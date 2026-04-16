@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "mysql+pymysql://SOLBA:solba2012@core.solba.com:3306/PANELDEGESTION"
+    database_url: str = "postgresql+psycopg2://SOLBA:solba2012@core.solba.com:5432/PANELDEGESTION"
     secret_key: str = "change-this-secret-in-production"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30

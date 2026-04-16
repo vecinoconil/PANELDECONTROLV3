@@ -1,8 +1,7 @@
 fastapi==0.111.1
 uvicorn[standard]==0.30.1
 sqlmodel==0.0.38
-pymysql==1.1.1
-cryptography>=42.0
+# PostgreSQL driver (ya incluido para conexiones de clientes)
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==3.2.2
