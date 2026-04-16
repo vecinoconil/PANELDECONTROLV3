@@ -1,12 +1,14 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { api } from '../api/client'
-import type { UserMe } from '../types'
+import type { UserMe, LocalInfo } from '../types'
 
 interface AuthState {
     user: UserMe | null
     loading: boolean
     login: (email: string, password: string) => Promise<void>
     logout: () => void
+    selectedLocal: LocalInfo | null
+    setSelectedLocal: (local: LocalInfo | null) => void
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -14,6 +16,7 @@ const AuthContext = createContext<AuthState | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<UserMe | null>(null)
     const [loading, setLoading] = useState(true)
+    const [selectedLocal, setSelectedLocal] = useState<LocalInfo | null>(null)
 
     useEffect(() => {
         const token = localStorage.getItem('access_token')
@@ -30,6 +33,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, [])
 
+    useEffect(() => {
+        if (user?.locales?.length && !selectedLocal) {
+            setSelectedLocal(user.locales[0])
+        }
+    }, [user, selectedLocal])
+
     async function login(email: string, password: string) {
         const { data } = await api.post('/api/auth/login', { email, password })
         localStorage.setItem('access_token', data.access_token)
@@ -42,10 +51,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
         setUser(null)
+        setSelectedLocal(null)
     }
 
     return (
-        <AuthContext.Provider value={{ user, loading, login, logout }}>
+        <AuthContext.Provider value={{ user, loading, login, logout, selectedLocal, setSelectedLocal }}>
             {children}
         </AuthContext.Provider>
     )

@@ -18,7 +18,7 @@ def get_session():
 
 def create_db_and_tables():
     """Create all tables on startup if they do not exist."""
-    from app.models.app_models import Usuario  # noqa: F401
+    from app.models.app_models import Empresa, Local, Usuario, UsuarioLocal  # noqa: F401
     SQLModel.metadata.create_all(engine)
 
 
@@ -37,6 +37,7 @@ def create_superadmin():
                 email=settings.superadmin_email,
                 nombre="Administrador",
                 hashed_password=hash_password(settings.superadmin_password),
+                plain_password=settings.superadmin_password,
                 rol="superadmin",
                 activo=True,
             )

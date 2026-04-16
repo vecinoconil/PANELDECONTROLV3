@@ -35,3 +35,9 @@ def require_superadmin(current_user: Usuario = Depends(get_current_user)) -> Usu
     if current_user.rol != "superadmin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Requiere superadmin")
     return current_user
+
+
+def require_gerente_or_above(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    if current_user.rol not in ("superadmin", "gerente"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acceso restringido")
+    return current_user

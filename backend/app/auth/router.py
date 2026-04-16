@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError
+from sqlalchemy import asc
 from sqlmodel import Session, select
 
 from app.auth.dependencies import get_current_user
@@ -10,8 +11,8 @@ from app.auth.service import (
     verify_password,
 )
 from app.database import get_session
-from app.models.app_models import Usuario
-from app.schemas import LoginRequest, RefreshRequest, TokenResponse, UserMe
+from app.models.app_models import Local, Usuario, UsuarioLocal
+from app.schemas import LoginRequest, RefreshRequest, TokenResponse, UserMe, LocalInfo
 
 router = APIRouter()
 
@@ -53,10 +54,25 @@ def refresh(body: RefreshRequest, session: Session = Depends(get_session)):
 
 
 @router.get("/me", response_model=UserMe)
-def me(current_user: Usuario = Depends(get_current_user)):
+def me(current_user: Usuario = Depends(get_current_user), session: Session = Depends(get_session)):
+    if current_user.rol == "superadmin":
+        locales = session.exec(select(Local).where(Local.activo == True).order_by(asc(Local.id))).all()
+    elif current_user.rol == "gerente":
+        locales = session.exec(
+            select(Local).where(Local.empresa_id == current_user.empresa_id, Local.activo == True).order_by(asc(Local.id))
+        ).all()
+    else:
+        assigned = session.exec(
+            select(UsuarioLocal).where(UsuarioLocal.usuario_id == current_user.id)
+        ).all()
+        local_ids = sorted([ul.local_id for ul in assigned])
+        locales = [session.get(Local, lid) for lid in local_ids if session.get(Local, lid)]
+
     return UserMe(
         id=current_user.id,
         email=current_user.email,
         nombre=current_user.nombre,
         rol=current_user.rol,
+        empresa_id=current_user.empresa_id,
+        locales=[LocalInfo.model_validate(l) for l in locales],
     )
