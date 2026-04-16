@@ -1,6 +1,9 @@
 import os
 from dotenv import load_dotenv
 
+# Ensure working directory is the backend folder
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 load_dotenv()
 
 import uvicorn

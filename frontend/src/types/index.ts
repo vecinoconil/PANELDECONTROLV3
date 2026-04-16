@@ -54,6 +54,7 @@ export interface Proveedor {
     pro_codigo: number
     pro_nombre: string
     total_compras: number
+    pendiente: number
 }
 
 export interface TopCliente {
@@ -61,6 +62,8 @@ export interface TopCliente {
     cli_nombre: string
     total: number
     base: number
+    beneficio: number
+    pendiente: number
 }
 
 export interface AgenteOption {
@@ -68,11 +71,47 @@ export interface AgenteOption {
     nombre: string
 }
 
+export interface ProductoFamilia {
+    referencia: string
+    descripcion: string
+    unidades: number
+    total_venta: number
+    total_coste: number
+    beneficio: number
+}
+
+export interface VencimientosResumen {
+    clientes: number
+    clientes_count: number
+    proveedores: number
+    proveedores_count: number
+}
+
+export interface FacturaDoc {
+    serie: string
+    numero: number
+    fecha: string
+    tipo_doc?: string
+    base: number
+    iva: number
+    total: number
+    pendiente: number
+}
+
+export interface VencimientoDetalle {
+    codigo: number
+    nombre: string
+    serie: string
+    numero: number
+    fecha: string
+    importe: number
+}
+
 export interface CuadroMandosData {
     anio: number
     mes_desde: number
     mes_hasta: number
-    filtro_serie: string | null
+    filtro_series: string[]
     filtro_agente: number | null
     ventas_mensuales: VentaMensual[]
     compras_mensuales: CompraMensual[]
@@ -80,6 +119,9 @@ export interface CuadroMandosData {
         ventas: number
         base_ventas: number
         num_facturas: number
+        total_facturas: number
+        total_albaranes_pte: number
+        num_albaranes_pte: number
         compras: number
         cobros: number
         pagos: number
