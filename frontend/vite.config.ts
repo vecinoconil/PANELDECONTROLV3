@@ -12,7 +12,7 @@ export default defineConfig({
         },
         proxy: {
             '/api': {
-                target: process.env.BACKEND_URL || 'http://localhost:8000',
+                target: process.env.BACKEND_URL || 'http://localhost:4000',
                 changeOrigin: true,
             },
         },

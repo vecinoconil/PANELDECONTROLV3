@@ -45,11 +45,21 @@ class UserMe(BaseModel):
 class EmpresaCreate(BaseModel):
     nombre: str
     plan: str = "basic"
+    pg_host: Optional[str] = None
+    pg_port: int = 5026
+    pg_name: Optional[str] = None
+    pg_user: Optional[str] = None
+    pg_password: Optional[str] = None
 
 
 class EmpresaUpdate(BaseModel):
     nombre: Optional[str] = None
     plan: Optional[str] = None
+    pg_host: Optional[str] = None
+    pg_port: Optional[int] = None
+    pg_name: Optional[str] = None
+    pg_user: Optional[str] = None
+    pg_password: Optional[str] = None
 
 
 class EmpresaRead(BaseModel):
@@ -58,6 +68,10 @@ class EmpresaRead(BaseModel):
     plan: str
     activo: bool
     created_at: datetime
+    pg_host: Optional[str] = None
+    pg_port: int = 5026
+    pg_name: Optional[str] = None
+    pg_user: Optional[str] = None
 
     class Config:
         from_attributes = True

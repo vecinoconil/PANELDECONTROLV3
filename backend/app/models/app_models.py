@@ -12,6 +12,12 @@ class Empresa(SQLModel, table=True):
     plan: str = Field(default="basic", max_length=50)
     activo: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    # PostgreSQL connection for business data
+    pg_host: Optional[str] = Field(default=None, max_length=200)
+    pg_port: int = Field(default=5026)
+    pg_name: Optional[str] = Field(default=None, max_length=200)
+    pg_user: Optional[str] = Field(default=None, max_length=100)
+    pg_password: Optional[str] = Field(default=None, max_length=200)
 
 
 class Local(SQLModel, table=True):
