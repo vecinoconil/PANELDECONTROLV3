@@ -20,6 +20,12 @@ class Empresa(SQLModel, table=True):
     pg_password: Optional[str] = Field(default=None, max_length=200)
     usar_tunnel: bool = Field(default=False)
     tunnel_port: Optional[int] = Field(default=None)
+    # SMTP outgoing mail config
+    smtp_host: Optional[str] = Field(default=None, max_length=200)
+    smtp_port: int = Field(default=465)
+    smtp_user: Optional[str] = Field(default=None, max_length=200)
+    smtp_password: Optional[str] = Field(default=None, max_length=200)
+    smtp_from_name: Optional[str] = Field(default=None, max_length=200)
 
 
 class Local(SQLModel, table=True):
@@ -44,6 +50,11 @@ class Usuario(SQLModel, table=True):
     activo: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     permisos: str = Field(default='[]', max_length=2000)  # JSON array of permission keys
+    # Autoventa config
+    agente_autoventa: Optional[int] = Field(default=None)
+    serie_autoventa: Optional[str] = Field(default=None, max_length=20)
+    autoventa_modifica_precio: bool = Field(default=False)
+    fpagos_autoventa: str = Field(default='[]', max_length=500)  # JSON array of formaspago codes
 
 
 class UsuarioLocal(SQLModel, table=True):

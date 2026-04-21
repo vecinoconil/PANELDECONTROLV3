@@ -13,6 +13,7 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.admin import router as admin_router
 from app.routers.informes import router as informes_router
 from app.routers.contabilidad import router as contabilidad_router
+from app.routers.autoventa import router as autoventa_router
 
 
 @asynccontextmanager
@@ -41,6 +42,7 @@ app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(admin_router,     prefix="/api/admin",     tags=["Admin"])
 app.include_router(informes_router,       prefix="/api/informes",      tags=["Informes"])
 app.include_router(contabilidad_router,   prefix="/api/contabilidad",  tags=["Contabilidad"])
+app.include_router(autoventa_router,      prefix="/api/autoventa",     tags=["Autoventa"])
 
 
 @app.get("/api/health", tags=["Health"])

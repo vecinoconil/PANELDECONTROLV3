@@ -9,6 +9,7 @@ import LibroIVA from './pages/contabilidad/LibroIVA'
 import Empresas from './pages/admin/Empresas'
 import Locales from './pages/admin/Locales'
 import Usuarios from './pages/admin/Usuarios'
+import Autoventa from './pages/autoventa/Autoventa'
 
 export default function App() {
     return (
@@ -24,6 +25,7 @@ export default function App() {
                             <Route path="/admin/empresas" element={<Empresas />} />
                             <Route path="/admin/locales" element={<Locales />} />
                             <Route path="/admin/usuarios" element={<Usuarios />} />
+                            <Route path="/autoventa" element={<Autoventa />} />
                         </Route>
                     </Route>
                     <Route path="*" element={<Navigate to="/dashboard" replace />} />

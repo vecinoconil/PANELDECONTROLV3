@@ -5,6 +5,9 @@ import { PERMISOS_DISPONIBLES } from '../../types'
 
 interface Empresa { id: number; nombre: string }
 interface LocalItem { id: number; nombre: string; empresa_id: number }
+interface AgenteOption { codigo: number; nombre: string }
+interface SerieOption { serie: string }
+interface FpagoOption { codigo: number; nombre: string }
 interface Usuario {
     id: number
     empresa_id: number | null
@@ -16,6 +19,10 @@ interface Usuario {
     created_at: string
     local_ids: number[]
     permisos: string[]
+    agente_autoventa: number | null
+    serie_autoventa: string | null
+    autoventa_modifica_precio: boolean
+    fpagos_autoventa: number[]
 }
 interface UsuarioForm {
     empresa_id: number | null
@@ -25,10 +32,18 @@ interface UsuarioForm {
     rol: string
     local_ids: number[]
     permisos: string[]
+    agente_autoventa: number | null
+    serie_autoventa: string | null
+    autoventa_modifica_precio: boolean
+    fpagos_autoventa: number[]
 }
 
 const ROLES = ['superadmin', 'gerente', 'encargado', 'usuario']
-const emptyForm: UsuarioForm = { empresa_id: null, email: '', nombre: '', password: '', rol: 'usuario', local_ids: [], permisos: [] }
+const emptyForm: UsuarioForm = {
+    empresa_id: null, email: '', nombre: '', password: '', rol: 'usuario',
+    local_ids: [], permisos: [],
+    agente_autoventa: null, serie_autoventa: null, autoventa_modifica_precio: false, fpagos_autoventa: [],
+}
 
 export default function Usuarios() {
     const [usuarios, setUsuarios] = useState<Usuario[]>([])
@@ -41,6 +56,10 @@ export default function Usuarios() {
     const [error, setError] = useState('')
     const [visiblePasswords, setVisiblePasswords] = useState<Set<number>>(new Set())
     const [sendingEmail, setSendingEmail] = useState<number | null>(null)
+    const [agentesOptions, setAgentesOptions] = useState<AgenteOption[]>([])
+    const [seriesOptions, setSeriesOptions] = useState<SerieOption[]>([])
+    const [fpagosOptions, setFpagosOptions] = useState<FpagoOption[]>([])
+    const [loadingPgData, setLoadingPgData] = useState(false)
 
     const fetch = async () => {
         setLoading(true)
@@ -59,13 +78,35 @@ export default function Usuarios() {
 
     useEffect(() => { fetch() }, [])
 
+    // Load agentes, series y formaspago when autoventa is selected and empresa is set
+    useEffect(() => {
+        if (showModal && form.permisos.includes('autoventa') && form.empresa_id) {
+            setLoadingPgData(true)
+            Promise.all([
+                api.get<AgenteOption[]>(`/api/admin/pg-data/agentes?empresa_id=${form.empresa_id}`),
+                api.get<SerieOption[]>(`/api/admin/pg-data/series?empresa_id=${form.empresa_id}`),
+                api.get<FpagoOption[]>(`/api/admin/pg-data/formaspago?empresa_id=${form.empresa_id}`),
+            ])
+                .then(([a, s, f]) => { setAgentesOptions(a.data); setSeriesOptions(s.data); setFpagosOptions(f.data) })
+                .catch(() => { setAgentesOptions([]); setSeriesOptions([]); setFpagosOptions([]) })
+                .finally(() => setLoadingPgData(false))
+        }
+    }, [showModal, form.permisos, form.empresa_id])
+
     const empresaName = (id: number | null) => id ? empresas.find(e => e.id === id)?.nombre || '—' : '—'
     const localesForEmpresa = form.empresa_id ? locales.filter(l => l.empresa_id === form.empresa_id) : locales
 
     const openNew = () => { setEditId(null); setForm(emptyForm); setShowModal(true); setError('') }
     const openEdit = (u: Usuario) => {
         setEditId(u.id)
-        setForm({ empresa_id: u.empresa_id, email: u.email, nombre: u.nombre, password: '', rol: u.rol, local_ids: u.local_ids, permisos: u.permisos || [] })
+        setForm({
+            empresa_id: u.empresa_id, email: u.email, nombre: u.nombre,
+            password: '', rol: u.rol, local_ids: u.local_ids, permisos: u.permisos || [],
+            agente_autoventa: u.agente_autoventa ?? null,
+            serie_autoventa: u.serie_autoventa ?? null,
+            autoventa_modifica_precio: u.autoventa_modifica_precio ?? false,
+            fpagos_autoventa: u.fpagos_autoventa ?? [],
+        })
         setShowModal(true)
         setError('')
     }
@@ -291,6 +332,82 @@ export default function Usuarios() {
                                         ))}
                                     </div>
                                     <p className="text-xs text-slate-400 mt-1">Superadmin y Gerente tienen acceso total automáticamente.</p>
+                                </div>
+                            )}
+                            {/* Autoventa config */}
+                            {(form.permisos.includes('autoventa') || form.rol === 'superadmin' || form.rol === 'gerente') && (
+                                <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-3">
+                                    <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Configuración Autoventa</p>
+                                    {!form.empresa_id ? (
+                                        <p className="text-xs text-amber-600">Asigna una empresa al usuario para cargar agentes y series.</p>
+                                    ) : loadingPgData ? (
+                                        <p className="text-xs text-slate-400">Cargando agentes y series...</p>
+                                    ) : agentesOptions.length === 0 ? (
+                                        <p className="text-xs text-red-600">No hay agentes activos. Crea un agente en el ERP antes de configurar Autoventa.</p>
+                                    ) : (
+                                        <>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="block text-xs font-medium text-slate-700 mb-1">Agente</label>
+                                                    <select
+                                                        className="input text-sm"
+                                                        value={form.agente_autoventa ?? ''}
+                                                        onChange={e => setForm({ ...form, agente_autoventa: e.target.value ? +e.target.value : null })}
+                                                    >
+                                                        <option value="">— Sin agente —</option>
+                                                        {agentesOptions.map(a => (
+                                                            <option key={a.codigo} value={a.codigo}>{a.nombre}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs font-medium text-slate-700 mb-1">Serie predeterminada</label>
+                                                    <select
+                                                        className="input text-sm"
+                                                        value={form.serie_autoventa ?? ''}
+                                                        onChange={e => setForm({ ...form, serie_autoventa: e.target.value || null })}
+                                                    >
+                                                        <option value="">— Sin serie —</option>
+                                                        {seriesOptions.map(s => (
+                                                            <option key={s.serie} value={s.serie}>{s.serie}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                                                <input
+                                                    type="checkbox"
+                                                    className="w-4 h-4 accent-brand"
+                                                    checked={form.autoventa_modifica_precio}
+                                                    onChange={e => setForm({ ...form, autoventa_modifica_precio: e.target.checked })}
+                                                />
+                                                <span className="text-xs text-slate-700">Puede modificar precios en Autoventa</span>
+                                            </label>
+                                            {fpagosOptions.length > 0 && (
+                                                <div>
+                                                    <p className="text-xs font-medium text-slate-700 mb-1">Formas de pago permitidas</p>
+                                                    <div className="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border border-amber-200 rounded p-2 bg-white">
+                                                        {fpagosOptions.map(fp => (
+                                                            <label key={fp.codigo} className="flex items-center gap-1 cursor-pointer select-none">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="w-3.5 h-3.5 accent-brand"
+                                                                    checked={form.fpagos_autoventa.includes(fp.codigo)}
+                                                                    onChange={e => {
+                                                                        const next = e.target.checked
+                                                                            ? [...form.fpagos_autoventa, fp.codigo]
+                                                                            : form.fpagos_autoventa.filter(c => c !== fp.codigo)
+                                                                        setForm({ ...form, fpagos_autoventa: next })
+                                                                    }}
+                                                                />
+                                                                <span className="text-xs text-slate-600 leading-tight">{fp.nombre}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
                                 </div>
                             )}
                         </div>

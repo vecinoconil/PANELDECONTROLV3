@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import {
     LayoutDashboard, Users2,
-    Building2, MapPin, Users, LogOut, BarChart3, BookText
+    Building2, MapPin, Users, LogOut, BarChart3, BookText, ShoppingCart
 } from 'lucide-react'
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -86,6 +86,21 @@ export default function Sidebar() {
                             <NavLink to="/contabilidad/libro-iva" className={linkClass}>
                                 <BookText className="w-4 h-4 flex-shrink-0" />
                                 <span className="whitespace-nowrap opacity-0 group-hover/sb:opacity-100 transition-opacity duration-300">Contabilidad</span>
+                            </NavLink>
+                        </div>
+                    </div>
+                )}
+
+                {/* Autoventa */}
+                {hasPerm('autoventa') && (
+                    <div>
+                        <h3 className="text-sidebar-heading text-[11px] font-semibold uppercase tracking-wider px-3 mb-2 whitespace-nowrap opacity-0 group-hover/sb:opacity-100 transition-opacity duration-300">
+                            Autoventa
+                        </h3>
+                        <div className="space-y-0.5">
+                            <NavLink to="/autoventa" className={linkClass}>
+                                <ShoppingCart className="w-4 h-4 flex-shrink-0" />
+                                <span className="whitespace-nowrap opacity-0 group-hover/sb:opacity-100 transition-opacity duration-300">Autoventa</span>
                             </NavLink>
                         </div>
                     </div>

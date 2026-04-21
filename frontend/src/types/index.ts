@@ -12,12 +12,17 @@ export interface UserMe {
     empresa_nombre: string | null
     locales: LocalInfo[]
     permisos: string[]
+    agente_autoventa: number | null
+    serie_autoventa: string | null
+    autoventa_modifica_precio: boolean
+    fpagos_autoventa: number[]
 }
 
 export const PERMISOS_DISPONIBLES = [
     { key: 'dashboard',          label: 'Dashboard' },
     { key: 'comparativa_ventas', label: 'Comparativa Ventas' },
     { key: 'contabilidad',       label: 'Contabilidad' },
+    { key: 'autoventa',          label: 'Autoventa' },
 ] as const
 
 export interface TokenResponse {

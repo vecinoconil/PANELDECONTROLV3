@@ -38,6 +38,17 @@ class UserMe(BaseModel):
     empresa_nombre: Optional[str] = None
     locales: list[LocalInfo] = []
     permisos: list[str] = []
+    agente_autoventa: Optional[int] = None
+    serie_autoventa: Optional[str] = None
+    autoventa_modifica_precio: bool = False
+    fpagos_autoventa: list[int] = []
+
+    @field_validator('fpagos_autoventa', mode='before')
+    @classmethod
+    def parse_fpagos_me(cls, v):
+        if isinstance(v, str):
+            return json.loads(v or '[]')
+        return v or []
 
     class Config:
         from_attributes = True
@@ -118,6 +129,10 @@ class UsuarioCreate(BaseModel):
     rol: str
     local_ids: list[int] = []
     permisos: list[str] = []
+    agente_autoventa: Optional[int] = None
+    serie_autoventa: Optional[str] = None
+    autoventa_modifica_precio: bool = False
+    fpagos_autoventa: list[int] = []
 
 
 class UsuarioUpdate(BaseModel):
@@ -129,6 +144,10 @@ class UsuarioUpdate(BaseModel):
     empresa_id: Optional[int] = None
     local_ids: Optional[list[int]] = None
     permisos: Optional[list[str]] = None
+    agente_autoventa: Optional[int] = None
+    serie_autoventa: Optional[str] = None
+    autoventa_modifica_precio: Optional[bool] = None
+    fpagos_autoventa: Optional[list[int]] = None
 
 
 class UsuarioRead(BaseModel):
@@ -142,10 +161,21 @@ class UsuarioRead(BaseModel):
     created_at: datetime
     local_ids: list[int] = []
     permisos: list[str] = []
+    agente_autoventa: Optional[int] = None
+    serie_autoventa: Optional[str] = None
+    autoventa_modifica_precio: bool = False
+    fpagos_autoventa: list[int] = []
 
     @field_validator('permisos', mode='before')
     @classmethod
     def parse_permisos(cls, v):
+        if isinstance(v, str):
+            return json.loads(v or '[]')
+        return v or []
+
+    @field_validator('fpagos_autoventa', mode='before')
+    @classmethod
+    def parse_fpagos(cls, v):
         if isinstance(v, str):
             return json.loads(v or '[]')
         return v or []

@@ -17,6 +17,7 @@ from app.schemas import (
     UsuarioCreate, UsuarioRead, UsuarioUpdate,
 )
 from app.services.email import send_credentials
+from app.services.pg_connection import get_pg_connection
 
 router = APIRouter()
 
@@ -40,6 +41,7 @@ def _usuario_to_read(user: Usuario, session: Session, *, include_password: bool 
     data = user.model_dump()
     data["local_ids"] = local_ids
     data["permisos"] = json.loads(data.get("permisos") or "[]")
+    data["fpagos_autoventa"] = json.loads(data.get("fpagos_autoventa") or "[]")
     if not include_password:
         data.pop("plain_password", None)
     return UsuarioRead(**data)
@@ -339,6 +341,10 @@ def create_usuario(
         plain_password=body.password,
         rol=body.rol,
         permisos=json.dumps(body.permisos),
+        agente_autoventa=body.agente_autoventa,
+        serie_autoventa=body.serie_autoventa,
+        autoventa_modifica_precio=body.autoventa_modifica_precio,
+        fpagos_autoventa=json.dumps(body.fpagos_autoventa),
     )
     session.add(user)
     session.flush()
@@ -375,6 +381,8 @@ def update_usuario(
     password = update_data.pop("password", None)
     if "permisos" in update_data:
         update_data["permisos"] = json.dumps(update_data["permisos"])
+    if "fpagos_autoventa" in update_data:
+        update_data["fpagos_autoventa"] = json.dumps(update_data["fpagos_autoventa"] or [])
 
     for field, value in update_data.items():
         setattr(user, field, value)
@@ -455,3 +463,80 @@ def delete_usuario(
     session.flush()
     session.delete(user)
     session.commit()
+
+
+# ── PG data helpers (for admin config) ───────────────────────────────────
+
+@router.get("/pg-data/formaspago")
+def pg_formaspago(
+    empresa_id: int,
+    session: Session = Depends(get_session),
+    current_user: Usuario = Depends(require_gerente_or_above),
+):
+    """Return formas de pago from business PG for a given empresa."""
+    empresa = session.get(Empresa, empresa_id)
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    if current_user.rol == "gerente" and empresa.id != current_user.empresa_id:
+        raise HTTPException(status_code=403, detail="Sin acceso a esta empresa")
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+        cur.execute("SELECT codigo, nombre FROM formaspago ORDER BY codigo")
+        return [{"codigo": r["codigo"], "nombre": r["nombre"]} for r in cur.fetchall()]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error conectando a BD: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get("/pg-data/agentes")
+def pg_agentes(
+    empresa_id: int,
+    session: Session = Depends(get_session),
+    current_user: Usuario = Depends(require_gerente_or_above),
+):
+    """Return agents list from business PG for a given empresa."""
+    empresa = session.get(Empresa, empresa_id)
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    if current_user.rol == "gerente" and empresa.id != current_user.empresa_id:
+        raise HTTPException(status_code=403, detail="Sin acceso a esta empresa")
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+        cur.execute("SELECT codigo, nombre FROM agentes WHERE baja = false ORDER BY nombre")
+        return [{"codigo": r["codigo"], "nombre": r["nombre"]} for r in cur.fetchall()]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error conectando a BD: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get("/pg-data/series")
+def pg_series(
+    empresa_id: int,
+    session: Session = Depends(get_session),
+    current_user: Usuario = Depends(require_gerente_or_above),
+):
+    """Return series list from business PG for a given empresa."""
+    empresa = session.get(Empresa, empresa_id)
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    if current_user.rol == "gerente" and empresa.id != current_user.empresa_id:
+        raise HTTPException(status_code=403, detail="Sin acceso a esta empresa")
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+        cur.execute("SELECT serie FROM series WHERE obsoleta = false ORDER BY serie")
+        return [{"serie": r["serie"]} for r in cur.fetchall()]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error conectando a BD: {e}")
+    finally:
+        if conn:
+            conn.close()
