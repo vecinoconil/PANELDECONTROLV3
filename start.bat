@@ -23,9 +23,9 @@ cd ..
 
 :: 3. Arrancar servidor
 echo.
-echo [3/3] Arrancando servidor en puerto 8000...
+echo [3/3] Arrancando servidor en puerto 4000...
 echo.
-echo    http://localhost:8000
+echo    http://localhost:4000
 echo.
 cd backend
 python run.py

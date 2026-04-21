@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netstat -ano)",
+      "Bash(sc query *)",
+      "Bash(iisreset /status)",
+      "Bash(powershell -Command \"& { Expand-Archive -Path 'C:\\\\frp.zip' -DestinationPath 'C:\\\\frp_tmp' -Force; Get-ChildItem 'C:\\\\frp_tmp' -Recurse | Select-Object FullName }\")",
+      "Bash(powershell -Command '& { *)",
+      "Bash(cmd /c \"sc delete frps\")",
+      "Bash(cmd /c \"C:\\\\frp\\\\nssm.exe install frps C:\\\\frp\\\\frps.exe -c C:\\\\frp\\\\frps.toml\")",
+      "Bash(cmd /c \"C:\\\\frp\\\\nssm.exe set frps AppStdout C:\\\\frp\\\\frps.log\")",
+      "Bash(cmd /c \"C:\\\\frp\\\\nssm.exe set frps AppStderr C:\\\\frp\\\\frps.log\")",
+      "Bash(cmd /c \"C:\\\\frp\\\\nssm.exe set frps Start SERVICE_AUTO_START\")",
+      "Bash(cmd /c \"net start frps\")",
+      "Bash(powershell -Command \"& { Get-Service frps -ErrorAction SilentlyContinue | Select-Object Name,Status,StartType }\")",
+      "Bash(powershell -Command \"& { Start-Service frps; Start-Sleep 3; Get-Service frps | Select-Object Name,Status }\")",
+      "Bash(cmd /c \"C:\\\\frp\\\\nssm.exe remove frps confirm\")",
+      "Bash(findstr \":7000\\\\|:7500\")",
+      "Bash(./frps.exe -c frps.toml)",
+      "Bash(findstr \":7000 \\\\|:7500 \")"
+    ]
+  }
+}

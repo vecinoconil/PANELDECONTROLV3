@@ -9,8 +9,16 @@ export interface UserMe {
     nombre: string
     rol: string
     empresa_id: number | null
+    empresa_nombre: string | null
     locales: LocalInfo[]
+    permisos: string[]
 }
+
+export const PERMISOS_DISPONIBLES = [
+    { key: 'dashboard',          label: 'Dashboard' },
+    { key: 'comparativa_ventas', label: 'Comparativa Ventas' },
+    { key: 'contabilidad',       label: 'Contabilidad' },
+] as const
 
 export interface TokenResponse {
     access_token: string
@@ -25,6 +33,8 @@ export interface VentaMensual {
     total: number
     base: number
     facturas: number
+    total_facturas: number
+    total_albaranes: number
 }
 
 export interface CompraMensual {
@@ -88,12 +98,76 @@ export interface VencimientosResumen {
 }
 
 export interface FacturaDoc {
+    id: number
     serie: string
     numero: number
     fecha: string
     tipo_doc?: string
     base: number
     iva: number
+    total: number
+    pendiente: number
+}
+
+export interface DocLinea {
+    orden: number
+    referencia: string | null
+    descripcion: string | null
+    unidades: number
+    precio: number
+    importe: number
+    coste: number
+    pdto1: number
+    pdto2: number
+    pdto3: number
+    descuento: number
+    piva: number
+}
+
+export interface DocVencimiento {
+    fecha: string | null
+    importe: number
+    situacion: number
+}
+
+export interface DocDetalle {
+    cabecera: {
+        id: number
+        tipodoc: number
+        serie: string
+        numero: number
+        fecha: string
+        fechafin: string | null
+        codigo_tercero: number
+        nombre_tercero: string
+        baseimpo1: number
+        baseimpo2: number
+        baseimpo3: number
+        piva1: number
+        piva2: number
+        piva3: number
+        iva1: number
+        iva2: number
+        iva3: number
+        rec1: number
+        rec2: number
+        rec3: number
+        irpf: number
+        total: number
+        descripcion: string
+        observaciones: string
+        fpago: number
+    }
+    lineas: DocLinea[]
+    vencimientos: DocVencimiento[]
+}
+
+export interface FraPteCobro {
+    id: number
+    serie: string
+    numero: number
+    fecha: string
+    cli_nombre: string
     total: number
     pendiente: number
 }
@@ -107,6 +181,85 @@ export interface VencimientoDetalle {
     importe: number
 }
 
+// ── Ficha Cliente types ──────────────────────────────────────────────────
+
+export interface FichaClienteProducto {
+    referencia: string
+    descripcion: string
+    [year: string]: string | number  // dynamic year columns
+}
+
+export interface FichaClienteFamilia {
+    familia: string
+    productos: FichaClienteProducto[]
+    [year: string]: string | number | FichaClienteProducto[]
+}
+
+export interface FichaClienteTopProducto {
+    referencia: string
+    descripcion: string
+    unidades: number
+    total_venta: number
+    beneficio: number
+    margen_pct: number
+}
+
+export interface FichaClienteDocumento {
+    id: number
+    tipodoc: number
+    serie: string
+    numero: number
+    fecha: string
+    total: number
+    pendiente: number
+    tipo_doc: string
+}
+
+export interface FichaClientePresupuesto {
+    id: number
+    serie: string
+    numero: number
+    fecha: string
+    total: number
+    descripcion: string
+}
+
+export interface FichaClienteData {
+    cliente: {
+        codigo: number
+        nombre: string
+        alias: string | null
+        cif: string
+        direccion: string
+        localidad: string
+        cpostal: string
+        telefono1: string
+        email: string
+        agente: number
+        fpago: number
+        observaciones: string
+    }
+    anio: number
+    anios_cols: number[]
+    ventas_mensuales: { anio: number; mes: number; total: number }[]
+    kpis: {
+        ticket_medio: number
+        ventas_anio: number
+        ventas_anio_anterior: number
+        margen_anio: number
+        margen_pct: number
+        ultima_compra: string | null
+        plazo_pago: number
+        frecuencia: number
+        saldo_pendiente: number
+    }
+    patron_semanal: number[]
+    productos_familia: FichaClienteFamilia[]
+    top_productos: Record<string, FichaClienteTopProducto[]>
+    documentos_venta: FichaClienteDocumento[]
+    presupuestos: FichaClientePresupuesto[]
+}
+
 export interface CuadroMandosData {
     anio: number
     mes_desde: number
@@ -114,7 +267,9 @@ export interface CuadroMandosData {
     filtro_series: string[]
     filtro_agente: number | null
     ventas_mensuales: VentaMensual[]
+    pte_cobro_mensual: Record<number, number>
     compras_mensuales: CompraMensual[]
+    pte_pago_mensual: Record<number, number>
     totales: {
         ventas: number
         base_ventas: number
@@ -143,4 +298,165 @@ export interface CuadroMandosData {
         series: string[]
         agentes: AgenteOption[]
     }
+}
+
+// ── Ficha Proveedor types ────────────────────────────────────────────────
+
+export interface FichaProveedorTopProducto {
+    referencia: string
+    descripcion: string
+    unidades: number
+    total_compra: number
+}
+
+export interface FichaProveedorDocumento {
+    id: number
+    tipodoc: number
+    serie: string
+    numero: number
+    fecha: string
+    total: number
+    pendiente: number
+    tipo_doc: string
+}
+
+export interface FichaProveedorData {
+    proveedor: {
+        codigo: number
+        nombre: string
+        alias: string | null
+        cif: string
+        direccion: string
+        localidad: string
+        cpostal: string
+        telefono1: string
+        email: string
+        fpago: number
+        observaciones: string
+    }
+    anio: number
+    anios_cols: number[]
+    compras_mensuales: { anio: number; mes: number; total: number }[]
+    kpis: {
+        ticket_medio: number
+        compras_anio: number
+        compras_anio_anterior: number
+        ultima_compra: string | null
+        plazo_pago: number
+        frecuencia: number
+        saldo_pendiente: number
+    }
+    productos_familia: FichaClienteFamilia[]
+    top_productos: Record<string, FichaProveedorTopProducto[]>
+    documentos_compra: FichaProveedorDocumento[]
+}
+
+// ── Ficha Agente types ───────────────────────────────────────────────────
+
+export interface FichaAgenteTopProducto {
+    referencia: string
+    descripcion: string
+    unidades: number
+    total_venta: number
+}
+
+export interface FichaAgenteComision {
+    id: number
+    tipo_doc: string
+    serie: string
+    numero: number
+    fecha: string
+    cli_nombre: string
+    total: number
+    dias_pago: number
+}
+
+export interface FichaAgentePendiente {
+    id: number
+    tipo_doc: string
+    serie: string
+    numero: number
+    fecha: string
+    cli_nombre: string
+    importe: number
+    fecha_vencimiento: string
+    dias: number
+}
+
+export interface FichaAgenteVisita {
+    id: number
+    fecha: string
+    hora: string
+    cli_codigo: number
+    cli_nombre: string
+    contacto: string
+    medio: string
+    motivo: string
+    resultado: string
+    observaciones: string
+}
+
+export interface FichaAgenteData {
+    agente: {
+        codigo: number
+        nombre: string
+        cif: string
+        direccion: string
+        localidad: string
+        cpostal: string
+        telefono1: string
+        telefono2: string
+        email: string
+        observaciones: string
+        baja: boolean
+    }
+    anio: number
+    anios_cols: number[]
+    ventas_mensuales: { anio: number; mes: number; total: number }[]
+    kpis: {
+        ventas_anio: number
+        ventas_anio_anterior: number
+        num_clientes: number
+        clientes_anterior: number
+        ticket_medio_cliente: number
+        num_visitas: number
+        valor_por_visita: number
+        margen_anio: number
+        margen_pct: number
+        crecimiento_cartera: number
+        saldo_pendiente: number
+    }
+    comisiones_liquidables: FichaAgenteComision[]
+    pendientes_cobro: FichaAgentePendiente[]
+    top_productos: Record<string, FichaAgenteTopProducto[]>
+    has_visitas: boolean
+    visitas: FichaAgenteVisita[]
+}
+
+// ── Contabilidad: Libro IVA ──────────────────────────────────────────────
+
+export interface LibroIVALinea {
+    id: number
+    fecha: string
+    serie: string
+    numero: number
+    codigo_tercero: number
+    nombre_tercero: string
+    baseimpo1: number
+    piva1: number
+    iva1: number
+    rec1: number
+    baseimpo2: number
+    piva2: number
+    iva2: number
+    rec2: number
+    baseimpo3: number
+    piva3: number
+    iva3: number
+    rec3: number
+    irpf: number
+    total: number
+    fpago: number
+    fpago_nombre: string
+    pendiente: number
 }

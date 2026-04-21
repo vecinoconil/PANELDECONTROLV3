@@ -125,7 +125,7 @@ def comparativa_ventas_clientes(
         conn = get_pg_connection(empresa)
         cur = conn.cursor()
 
-        ventas_cond = "(vc.tipodoc = 8 OR (vc.tipodoc = 4 AND vc.fechafin IS NULL))"
+        ventas_cond = "vc.tipodoc = 8"
 
         # ── Build filters ──
         joins = ""
@@ -318,7 +318,7 @@ def comparativa_cliente_detalle(
         conn = get_pg_connection(empresa)
         cur = conn.cursor()
 
-        ventas_cond = "(vc.tipodoc = 8 OR (vc.tipodoc = 4 AND vc.fechafin IS NULL))"
+        ventas_cond = "vc.tipodoc = 8"
 
         month_filter = ""
         params: dict = {"cli_codigo": cli_codigo}
@@ -403,7 +403,7 @@ def comparativa_cliente_detalle(
 # Helper: build common filter fragments
 # ══════════════════════════════════════════════════════════════════════════════
 
-VENTAS_COND = "(vc.tipodoc = 8 OR (vc.tipodoc = 4 AND vc.fechafin IS NULL))"
+VENTAS_COND = "vc.tipodoc = 8"
 
 
 def _fval(v):
@@ -1014,6 +1014,242 @@ def condiciones_especiales(
 
         cur.close()
         return {"clientes": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ── Ficha Artículo ─────────────────────────────────────────────────────────────
+
+@router.get("/ficha-articulo")
+def ficha_articulo(
+    referencia: str = Query(...),
+    anio: int = Query(default=None),
+    current_user: Usuario = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    empresa = _get_empresa(current_user, session)
+    today = date.today()
+    if anio is None:
+        anio = today.year
+
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+
+        # ── Datos del artículo ──
+        cur.execute("""
+            SELECT a.referencia, a.nombre, '' AS descripcion,
+                   COALESCE(f.nombre, '') AS familia,
+                   COALESCE(sf.nombre, '') AS subfamilia,
+                   COALESCE(m.nombre, '') AS marca,
+                   COALESCE((SELECT precio FROM articulos_precios WHERE referencia = a.referencia AND tarifa = 1 LIMIT 1), 0) AS pvp1,
+                   COALESCE(a.pmp, 0) AS coste,
+                   COALESCE((SELECT SUM(actual) FROM almacenes_stock WHERE referencia = a.referencia), 0) AS stock
+            FROM articulos a
+            LEFT JOIN familias f ON a.familia = f.codigo
+            LEFT JOIN subfamilias sf ON a.subfamilia = sf.codigo AND a.familia = sf.familia
+            LEFT JOIN articulos_marcas m ON a.marca = m.codigo
+            WHERE a.referencia = %(ref)s
+        """, {"ref": referencia})
+        art_row = cur.fetchone()
+        articulo = dict(art_row) if art_row else {
+            "referencia": referencia, "nombre": referencia, "descripcion": "",
+            "familia": "", "subfamilia": "", "marca": "", "pvp1": 0, "coste": 0, "stock": 0
+        }
+        articulo = {k: (float(v) if hasattr(v, "as_tuple") else v) for k, v in articulo.items()}
+
+        # ── Ventas mensuales - 3 años ──
+        cur.execute("""
+            SELECT EXTRACT(YEAR FROM vc.fecha)::int AS anio,
+                   EXTRACT(MONTH FROM vc.fecha)::int AS mes,
+                   SUM(vl.importe) AS total,
+                   SUM(vl.unidades) AS uds,
+                   SUM(vl.coste * vl.unidades) AS coste_total
+            FROM ventas_lineas vl
+            JOIN ventas_cabeceras vc ON vl.idcab = vc.id
+            WHERE vc.tipodoc = 8
+              AND vl.referencia = %(ref)s
+              AND vc.fecha >= %(desde)s
+            GROUP BY 1, 2
+            ORDER BY 1, 2
+        """, {"ref": referencia, "desde": f"{anio - 2}-01-01"})
+        ventas_mensuales = [
+            {"anio": r["anio"], "mes": r["mes"],
+             "total": _fval(r["total"]), "uds": _fval(r["uds"]), "coste": _fval(r["coste_total"])}
+            for r in cur.fetchall()
+        ]
+
+        # ── KPIs ventas año seleccionado ──
+        cur.execute("""
+            SELECT COALESCE(SUM(vl.importe), 0) AS ventas,
+                   COALESCE(SUM(vl.unidades), 0) AS uds,
+                   COALESCE(SUM(vl.coste * vl.unidades), 0) AS coste_total
+            FROM ventas_lineas vl
+            JOIN ventas_cabeceras vc ON vl.idcab = vc.id
+            WHERE vc.tipodoc = 8
+              AND vl.referencia = %(ref)s
+              AND vc.fecha >= %(start)s AND vc.fecha < %(end)s
+        """, {"ref": referencia, "start": f"{anio}-01-01", "end": f"{anio + 1}-01-01"})
+        kv = cur.fetchone()
+        ventas = _fval(kv["ventas"])
+        uds_vendidas = _fval(kv["uds"])
+        coste_ventas = _fval(kv["coste_total"])
+        beneficio = ventas - coste_ventas
+        precio_medio = ventas / uds_vendidas if uds_vendidas else 0
+        margen_pct = (beneficio / ventas * 100) if ventas else 0
+
+        # ── KPIs compras año seleccionado ──
+        cur.execute("""
+            SELECT COALESCE(SUM(cl.importe), 0) AS compras,
+                   COALESCE(SUM(cl.unidades), 0) AS uds_compradas,
+                   COALESCE(SUM(cl.precio * cl.unidades), 0) AS coste_compra
+            FROM compras_lineas cl
+            JOIN compras_cabeceras cc ON cl.idcab = cc.id
+            WHERE cl.referencia = %(ref)s
+              AND cc.fecha >= %(start)s AND cc.fecha < %(end)s
+        """, {"ref": referencia, "start": f"{anio}-01-01", "end": f"{anio + 1}-01-01"})
+        kc = cur.fetchone()
+        compras = _fval(kc["compras"])
+        uds_compradas = _fval(kc["uds_compradas"])
+        coste_medio = compras / uds_compradas if uds_compradas else 0
+        rotacion = ventas / compras if compras else 0
+
+        # ── Detalle ventas ──
+        cur.execute("""
+            SELECT vc.id AS doc_id, vc.fecha, vc.serie, vc.numero, vc.tipodoc,
+                   vc.cli_codigo, vc.cli_nombre,
+                   vl.unidades, vl.precio AS precio_uni, vl.importe,
+                   vl.coste * vl.unidades AS coste_lin,
+                   vl.importe - vl.coste * vl.unidades AS beneficio_lin,
+                   vl.pdto1, vl.pdto2, vl.pdto3
+            FROM ventas_lineas vl
+            JOIN ventas_cabeceras vc ON vl.idcab = vc.id
+            WHERE vc.tipodoc = 8
+              AND vl.referencia = %(ref)s
+            ORDER BY vc.fecha DESC
+            LIMIT 300
+        """, {"ref": referencia})
+        TIPO_DOC = {8: "CI", 1: "PR", 3: "AL", 9: "AB", 10: "RC"}
+        ventas_detalle = []
+        for r in cur.fetchall():
+            td = r["tipodoc"]
+            doc_code = TIPO_DOC.get(td, str(td))
+            ventas_detalle.append({
+                "doc_id": r["doc_id"],
+                "fecha": str(r["fecha"]),
+                "doc": f"{doc_code} {r['serie']}{r['numero']}",
+                "cli_codigo": r["cli_codigo"],
+                "cli_nombre": r["cli_nombre"],
+                "uds": _fval(r["unidades"]),
+                "precio_uni": _fval(r["precio_uni"]),
+                "importe": _fval(r["importe"]),
+                "coste": _fval(r["coste_lin"]),
+                "beneficio": _fval(r["beneficio_lin"]),
+                "pdto1": _fval(r["pdto1"]),
+                "pdto2": _fval(r["pdto2"]),
+                "pdto3": _fval(r["pdto3"]),
+            })
+
+        # ── Detalle compras ──
+        cur.execute("""
+            SELECT cc.id AS doc_id, cc.fecha, cc.serie, cc.numero,
+                   cc.pro_codigo, cc.pro_nombre,
+                   cl.unidades, cl.precio AS precio_uni, cl.importe
+            FROM compras_lineas cl
+            JOIN compras_cabeceras cc ON cl.idcab = cc.id
+            WHERE cl.referencia = %(ref)s
+            ORDER BY cc.fecha DESC
+            LIMIT 200
+        """, {"ref": referencia})
+        compras_detalle = []
+        for r in cur.fetchall():
+            compras_detalle.append({
+                "doc_id": r["doc_id"],
+                "fecha": str(r["fecha"]),
+                "doc": f"CI {r['serie']}{r['numero']}",
+                "pro_codigo": r["pro_codigo"],
+                "pro_nombre": r["pro_nombre"],
+                "uds": _fval(r["unidades"]),
+                "precio_uni": _fval(r["precio_uni"]),
+                "importe": _fval(r["importe"]),
+            })
+
+        # ── Descuentos aplicados ──
+        cur.execute("""
+            SELECT vc.cli_codigo, vc.cli_nombre,
+                   vl.pdto1, vl.pdto2, vl.pdto3,
+                   ROUND(
+                     (1 - (1 - COALESCE(vl.pdto1,0)/100.0)
+                            * (1 - COALESCE(vl.pdto2,0)/100.0)
+                            * (1 - COALESCE(vl.pdto3,0)/100.0)) * 100, 2
+                   ) AS dto_efectivo,
+                   COUNT(*) AS veces,
+                   SUM(vl.unidades) AS uds,
+                   SUM(vl.importe) AS importe
+            FROM ventas_lineas vl
+            JOIN ventas_cabeceras vc ON vl.idcab = vc.id
+            WHERE vc.tipodoc = 8
+              AND vl.referencia = %(ref)s
+              AND (vl.pdto1 > 0 OR vl.pdto2 > 0 OR vl.pdto3 > 0)
+            GROUP BY vc.cli_codigo, vc.cli_nombre, vl.pdto1, vl.pdto2, vl.pdto3
+            ORDER BY dto_efectivo DESC, vc.cli_nombre
+        """, {"ref": referencia})
+
+        dto_raw = cur.fetchall()
+        # Agrupar por dto_efectivo
+        dto_groups: dict = {}
+        for r in dto_raw:
+            dto = float(r["dto_efectivo"]) if r["dto_efectivo"] is not None else 0
+            key = f"{dto:.2f}"
+            if key not in dto_groups:
+                dto_groups[key] = {
+                    "dto_efectivo": dto,
+                    "pdto1": _fval(r["pdto1"]),
+                    "pdto2": _fval(r["pdto2"]),
+                    "pdto3": _fval(r["pdto3"]),
+                    "total_veces": 0,
+                    "total_uds": 0,
+                    "total_importe": 0,
+                    "clientes": []
+                }
+            entry = dto_groups[key]
+            entry["total_veces"] += int(r["veces"])
+            entry["total_uds"] += _fval(r["uds"])
+            entry["total_importe"] += _fval(r["importe"])
+            entry["clientes"].append({
+                "cli_codigo": r["cli_codigo"],
+                "cli_nombre": r["cli_nombre"],
+                "veces": int(r["veces"]),
+                "uds": _fval(r["uds"]),
+                "importe": _fval(r["importe"]),
+            })
+
+        descuentos = sorted(dto_groups.values(), key=lambda x: -x["dto_efectivo"])
+
+        cur.close()
+        return {
+            "articulo": articulo,
+            "anio": anio,
+            "ventas_mensuales": ventas_mensuales,
+            "kpis": {
+                "ventas": ventas,
+                "beneficio": beneficio,
+                "margen_pct": margen_pct,
+                "uds_vendidas": uds_vendidas,
+                "precio_medio": precio_medio,
+                "compras": compras,
+                "uds_compradas": uds_compradas,
+                "coste_medio": coste_medio,
+                "rotacion": rotacion,
+            },
+            "ventas_detalle": ventas_detalle,
+            "compras_detalle": compras_detalle,
+            "descuentos": descuentos,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
     finally:

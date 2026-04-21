@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { Users, Plus, Pencil, Trash2, Power } from 'lucide-react'
+import { Users, Plus, Pencil, Trash2, Power, Eye, EyeOff, Mail } from 'lucide-react'
+import { PERMISOS_DISPONIBLES } from '../../types'
 
 interface Empresa { id: number; nombre: string }
 interface LocalItem { id: number; nombre: string; empresa_id: number }
@@ -14,6 +15,7 @@ interface Usuario {
     plain_password: string | null
     created_at: string
     local_ids: number[]
+    permisos: string[]
 }
 interface UsuarioForm {
     empresa_id: number | null
@@ -22,10 +24,11 @@ interface UsuarioForm {
     password: string
     rol: string
     local_ids: number[]
+    permisos: string[]
 }
 
 const ROLES = ['superadmin', 'gerente', 'encargado', 'usuario']
-const emptyForm: UsuarioForm = { empresa_id: null, email: '', nombre: '', password: '', rol: 'usuario', local_ids: [] }
+const emptyForm: UsuarioForm = { empresa_id: null, email: '', nombre: '', password: '', rol: 'usuario', local_ids: [], permisos: [] }
 
 export default function Usuarios() {
     const [usuarios, setUsuarios] = useState<Usuario[]>([])
@@ -36,6 +39,8 @@ export default function Usuarios() {
     const [editId, setEditId] = useState<number | null>(null)
     const [form, setForm] = useState<UsuarioForm>(emptyForm)
     const [error, setError] = useState('')
+    const [visiblePasswords, setVisiblePasswords] = useState<Set<number>>(new Set())
+    const [sendingEmail, setSendingEmail] = useState<number | null>(null)
 
     const fetch = async () => {
         setLoading(true)
@@ -60,7 +65,7 @@ export default function Usuarios() {
     const openNew = () => { setEditId(null); setForm(emptyForm); setShowModal(true); setError('') }
     const openEdit = (u: Usuario) => {
         setEditId(u.id)
-        setForm({ empresa_id: u.empresa_id, email: u.email, nombre: u.nombre, password: '', rol: u.rol, local_ids: u.local_ids })
+        setForm({ empresa_id: u.empresa_id, email: u.email, nombre: u.nombre, password: '', rol: u.rol, local_ids: u.local_ids, permisos: u.permisos || [] })
         setShowModal(true)
         setError('')
     }
@@ -72,6 +77,25 @@ export default function Usuarios() {
                 ? prev.local_ids.filter(l => l !== id)
                 : [...prev.local_ids, id]
         }))
+    }
+
+    const togglePermiso = (key: string) => {
+        setForm(prev => ({
+            ...prev,
+            permisos: prev.permisos.includes(key)
+                ? prev.permisos.filter(p => p !== key)
+                : [...prev.permisos, key]
+        }))
+    }
+
+    const showPermisos = form.rol === 'encargado' || form.rol === 'usuario'
+
+    const togglePasswordVisible = (id: number) => {
+        setVisiblePasswords(prev => {
+            const next = new Set(prev)
+            next.has(id) ? next.delete(id) : next.add(id)
+            return next
+        })
     }
 
     const save = async () => {
@@ -93,10 +117,24 @@ export default function Usuarios() {
         try { await api.patch(`/api/admin/usuarios/${id}/toggle`); fetch() }
         catch (e: any) { alert(e.response?.data?.detail || 'Error') }
     }
+
     const remove = async (id: number) => {
         if (!confirm('¿Eliminar este usuario?')) return
         try { await api.delete(`/api/admin/usuarios/${id}`); fetch() }
         catch (e: any) { alert(e.response?.data?.detail || 'Error eliminando') }
+    }
+
+    const sendCredentials = async (id: number, email: string) => {
+        if (!confirm(`¿Enviar credenciales de acceso a ${email}?`)) return
+        setSendingEmail(id)
+        try {
+            await api.post(`/api/admin/usuarios/${id}/send-credentials`)
+            alert('Credenciales enviadas correctamente')
+        } catch (e: any) {
+            alert(e.response?.data?.detail || 'Error enviando email')
+        } finally {
+            setSendingEmail(null)
+        }
     }
 
     const rolBadge = (rol: string) => {
@@ -144,7 +182,22 @@ export default function Usuarios() {
                                     <td className="py-2 px-3 text-slate-400">{u.id}</td>
                                     <td className="py-2 px-3 font-medium">{u.nombre}</td>
                                     <td className="py-2 px-3 text-slate-600">{u.email}</td>
-                                    <td className="py-2 px-3 text-xs text-slate-400 font-mono">{u.plain_password || '••••'}</td>
+                                    <td className="py-2 px-3 text-xs font-mono text-slate-400">
+                                        <div className="flex items-center gap-1">
+                                            <span>{u.plain_password ? (visiblePasswords.has(u.id) ? u.plain_password : '••••••••') : '—'}</span>
+                                            {u.plain_password && (
+                                                <button
+                                                    onClick={() => togglePasswordVisible(u.id)}
+                                                    className="p-0.5 rounded hover:bg-slate-200"
+                                                    title={visiblePasswords.has(u.id) ? 'Ocultar' : 'Ver contraseña'}
+                                                >
+                                                    {visiblePasswords.has(u.id)
+                                                        ? <EyeOff className="w-3 h-3 text-slate-400" />
+                                                        : <Eye className="w-3 h-3 text-slate-400" />}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </td>
                                     <td className="py-2 px-3"><span className={`badge ${rolBadge(u.rol)}`}>{u.rol}</span></td>
                                     <td className="py-2 px-3 text-slate-500">{empresaName(u.empresa_id)}</td>
                                     <td className="py-2 px-3">
@@ -155,6 +208,14 @@ export default function Usuarios() {
                                     <td className="py-2 px-3 text-right">
                                         <div className="flex items-center justify-end gap-1">
                                             <button onClick={() => openEdit(u)} className="p-1.5 rounded hover:bg-slate-100" title="Editar"><Pencil className="w-3.5 h-3.5 text-slate-500" /></button>
+                                            <button
+                                                onClick={() => sendCredentials(u.id, u.email)}
+                                                className="p-1.5 rounded hover:bg-blue-50"
+                                                title="Enviar credenciales por email"
+                                                disabled={sendingEmail === u.id}
+                                            >
+                                                <Mail className={`w-3.5 h-3.5 ${sendingEmail === u.id ? 'text-slate-300' : 'text-blue-500'}`} />
+                                            </button>
                                             <button onClick={() => toggle(u.id)} className="p-1.5 rounded hover:bg-slate-100" title="Activar/Desactivar"><Power className="w-3.5 h-3.5 text-slate-500" /></button>
                                             {u.rol !== 'superadmin' && <button onClick={() => remove(u.id)} className="p-1.5 rounded hover:bg-red-50" title="Eliminar"><Trash2 className="w-3.5 h-3.5 text-red-500" /></button>}
                                         </div>
@@ -216,6 +277,20 @@ export default function Usuarios() {
                                             </label>
                                         ))}
                                     </div>
+                                </div>
+                            )}
+                            {showPermisos && (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Permisos de acceso</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {PERMISOS_DISPONIBLES.map(p => (
+                                            <label key={p.key} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer text-xs ${form.permisos.includes(p.key) ? 'bg-brand/10 border-brand text-brand' : 'border-slate-200 text-slate-500'}`}>
+                                                <input type="checkbox" className="sr-only" checked={form.permisos.includes(p.key)} onChange={() => togglePermiso(p.key)} />
+                                                {p.label}
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <p className="text-xs text-slate-400 mt-1">Superadmin y Gerente tienen acceso total automáticamente.</p>
                                 </div>
                             )}
                         </div>

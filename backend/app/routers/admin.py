@@ -1,5 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import io
+import json
+import zipfile
+
+from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
+import psycopg2
 
 from app.auth.dependencies import require_superadmin, require_gerente_or_above, get_current_user
 from app.auth.service import hash_password
@@ -10,6 +16,7 @@ from app.schemas import (
     LocalCreate, LocalRead, LocalUpdate,
     UsuarioCreate, UsuarioRead, UsuarioUpdate,
 )
+from app.services.email import send_credentials
 
 router = APIRouter()
 
@@ -32,6 +39,7 @@ def _usuario_to_read(user: Usuario, session: Session, *, include_password: bool 
     local_ids = [ul.local_id for ul in ul_rows]
     data = user.model_dump()
     data["local_ids"] = local_ids
+    data["permisos"] = json.loads(data.get("permisos") or "[]")
     if not include_password:
         data.pop("plain_password", None)
     return UsuarioRead(**data)
@@ -106,6 +114,113 @@ def toggle_empresa(
     session.commit()
     session.refresh(empresa)
     return empresa
+
+
+@router.post("/empresas/test-connection")
+def test_pg_connection(
+    pg_host: str = Body(...),
+    pg_port: int = Body(5026),
+    pg_name: str = Body(...),
+    pg_user: str = Body(...),
+    pg_password: str = Body(...),
+    _: Usuario = Depends(require_superadmin),
+):
+    try:
+        conn = psycopg2.connect(
+            host=pg_host,
+            port=pg_port,
+            dbname=pg_name,
+            user=pg_user,
+            password=pg_password,
+            connect_timeout=5,
+        )
+        conn.close()
+        return {"ok": True, "message": "Conexión exitosa"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+@router.get("/empresas/{empresa_id}/frpc-download")
+def download_frpc_installer(
+    empresa_id: int,
+    session: Session = Depends(get_session),
+    _: Usuario = Depends(require_superadmin),
+):
+    empresa = session.get(Empresa, empresa_id)
+    if not empresa:
+        raise HTTPException(status_code=404, detail="Empresa no encontrada")
+    if not empresa.usar_tunnel or not empresa.tunnel_port:
+        raise HTTPException(status_code=400, detail="Esta empresa no tiene túnel configurado")
+
+    frpc_path = r"C:\frp\frpc.exe"
+    try:
+        with open(frpc_path, "rb") as f:
+            frpc_bytes = f.read()
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="frpc.exe no encontrado en el servidor")
+
+    # frpc.toml config
+    frpc_toml = f"""serverAddr = "panelv3.solba.com"
+serverPort = 7000
+auth.token = "SolbaFRP2024!"
+
+[[proxies]]
+name = "bd-{empresa.nombre.lower().replace(' ', '-')}-{empresa_id}"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = {empresa.pg_port or 5026}
+remotePort = {empresa.tunnel_port}
+"""
+
+    # install.bat — instala frpc como tarea programada de Windows
+    install_bat = f"""@echo off
+setlocal
+set "DIR=%~dp0"
+set "FRPC=%DIR%frpc.exe"
+set "CFG=%DIR%frpc.toml"
+
+echo Instalando tunel FRP para {empresa.nombre}...
+
+:: Eliminar tarea anterior si existe
+schtasks /delete /tn "frpc-solba" /f >nul 2>&1
+
+:: Crear tarea programada que arranca al inicio como SYSTEM
+schtasks /create /tn "frpc-solba" /tr "\"%FRPC%\" -c \"%CFG%\"" /sc onstart /ru SYSTEM /rl HIGHEST /f
+
+:: Arrancar ahora
+schtasks /run /tn "frpc-solba"
+
+echo.
+echo Tunel instalado y arrancado correctamente.
+echo Puerto remoto asignado: {empresa.tunnel_port}
+echo.
+pause
+"""
+
+    # uninstall.bat
+    uninstall_bat = """@echo off
+schtasks /end /tn "frpc-solba" >nul 2>&1
+schtasks /delete /tn "frpc-solba" /f >nul 2>&1
+echo Tunel desinstalado.
+pause
+"""
+
+    # Build zip in memory
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("frpc.toml", frpc_toml)
+        zf.writestr("instalar.bat", install_bat)
+        zf.writestr("desinstalar.bat", uninstall_bat)
+        zf.write(frpc_path, "frpc.exe")
+    buf.seek(0)
+
+    nombre_safe = empresa.nombre.replace(" ", "_").replace("/", "-")
+    filename = f"tunel_frp_{nombre_safe}.zip"
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── Locales ───────────────────────────────────────────────────────────────
@@ -223,6 +338,7 @@ def create_usuario(
         hashed_password=hash_password(body.password),
         plain_password=body.password,
         rol=body.rol,
+        permisos=json.dumps(body.permisos),
     )
     session.add(user)
     session.flush()
@@ -257,6 +373,8 @@ def update_usuario(
     update_data = body.model_dump(exclude_unset=True)
     local_ids = update_data.pop("local_ids", None)
     password = update_data.pop("password", None)
+    if "permisos" in update_data:
+        update_data["permisos"] = json.dumps(update_data["permisos"])
 
     for field, value in update_data.items():
         setattr(user, field, value)
@@ -296,6 +414,25 @@ def toggle_usuario(
     session.commit()
     session.refresh(user)
     return _usuario_to_read(user, session)
+
+
+@router.post("/usuarios/{usuario_id}/send-credentials", status_code=status.HTTP_200_OK)
+def send_user_credentials(
+    usuario_id: int,
+    session: Session = Depends(get_session),
+    current_user: Usuario = Depends(require_gerente_or_above),
+):
+    user = session.get(Usuario, usuario_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    _assert_can_manage(current_user, user)
+    if not user.plain_password:
+        raise HTTPException(status_code=400, detail="Este usuario no tiene contraseña almacenada")
+    try:
+        send_credentials(user.email, user.nombre, user.plain_password)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error enviando email: {e}")
+    return {"ok": True, "message": f"Credenciales enviadas a {user.email}"}
 
 
 @router.delete("/usuarios/{usuario_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -1,6 +1,7 @@
+import json
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────
@@ -34,7 +35,9 @@ class UserMe(BaseModel):
     nombre: str
     rol: str
     empresa_id: Optional[int] = None
+    empresa_nombre: Optional[str] = None
     locales: list[LocalInfo] = []
+    permisos: list[str] = []
 
     class Config:
         from_attributes = True
@@ -50,6 +53,8 @@ class EmpresaCreate(BaseModel):
     pg_name: Optional[str] = None
     pg_user: Optional[str] = None
     pg_password: Optional[str] = None
+    usar_tunnel: bool = False
+    tunnel_port: Optional[int] = None
 
 
 class EmpresaUpdate(BaseModel):
@@ -60,6 +65,8 @@ class EmpresaUpdate(BaseModel):
     pg_name: Optional[str] = None
     pg_user: Optional[str] = None
     pg_password: Optional[str] = None
+    usar_tunnel: Optional[bool] = None
+    tunnel_port: Optional[int] = None
 
 
 class EmpresaRead(BaseModel):
@@ -72,6 +79,8 @@ class EmpresaRead(BaseModel):
     pg_port: int = 5026
     pg_name: Optional[str] = None
     pg_user: Optional[str] = None
+    usar_tunnel: bool = False
+    tunnel_port: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -108,6 +117,7 @@ class UsuarioCreate(BaseModel):
     password: str
     rol: str
     local_ids: list[int] = []
+    permisos: list[str] = []
 
 
 class UsuarioUpdate(BaseModel):
@@ -118,6 +128,7 @@ class UsuarioUpdate(BaseModel):
     activo: Optional[bool] = None
     empresa_id: Optional[int] = None
     local_ids: Optional[list[int]] = None
+    permisos: Optional[list[str]] = None
 
 
 class UsuarioRead(BaseModel):
@@ -130,6 +141,14 @@ class UsuarioRead(BaseModel):
     plain_password: Optional[str] = None
     created_at: datetime
     local_ids: list[int] = []
+    permisos: list[str] = []
+
+    @field_validator('permisos', mode='before')
+    @classmethod
+    def parse_permisos(cls, v):
+        if isinstance(v, str):
+            return json.loads(v or '[]')
+        return v or []
 
     class Config:
         from_attributes = True

@@ -20,6 +20,16 @@ def create_db_and_tables():
     """Create all tables on startup if they do not exist."""
     from app.models.app_models import Empresa, Local, Usuario, UsuarioLocal  # noqa: F401
     SQLModel.metadata.create_all(engine)
+    _run_migrations()
+
+
+def _run_migrations():
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permisos VARCHAR(2000) DEFAULT '[]'"
+        ))
+        conn.commit()
 
 
 def create_superadmin():

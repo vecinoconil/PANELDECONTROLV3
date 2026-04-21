@@ -18,6 +18,8 @@ class Empresa(SQLModel, table=True):
     pg_name: Optional[str] = Field(default=None, max_length=200)
     pg_user: Optional[str] = Field(default=None, max_length=100)
     pg_password: Optional[str] = Field(default=None, max_length=200)
+    usar_tunnel: bool = Field(default=False)
+    tunnel_port: Optional[int] = Field(default=None)
 
 
 class Local(SQLModel, table=True):
@@ -41,6 +43,7 @@ class Usuario(SQLModel, table=True):
     rol: str = Field(max_length=20)  # superadmin | gerente | encargado | usuario
     activo: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    permisos: str = Field(default='[]', max_length=2000)  # JSON array of permission keys
 
 
 class UsuarioLocal(SQLModel, table=True):

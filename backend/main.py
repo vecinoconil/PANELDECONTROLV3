@@ -12,6 +12,7 @@ from app.auth.router import router as auth_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.admin import router as admin_router
 from app.routers.informes import router as informes_router
+from app.routers.contabilidad import router as contabilidad_router
 
 
 @asynccontextmanager
@@ -38,7 +39,8 @@ app.add_middleware(
 app.include_router(auth_router,      prefix="/api/auth",      tags=["Auth"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(admin_router,     prefix="/api/admin",     tags=["Admin"])
-app.include_router(informes_router,  prefix="/api/informes",  tags=["Informes"])
+app.include_router(informes_router,       prefix="/api/informes",      tags=["Informes"])
+app.include_router(contabilidad_router,   prefix="/api/contabilidad",  tags=["Contabilidad"])
 
 
 @app.get("/api/health", tags=["Health"])

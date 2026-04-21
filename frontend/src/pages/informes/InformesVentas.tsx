@@ -1,8 +1,11 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from '../../api/client'
+import FichaCliente from '../../components/FichaCliente'
+import FichaAgente from '../../components/FichaAgente'
+import FichaArticulo from '../../components/FichaArticulo'
 import {
     Search, Download, ChevronDown, ChevronRight, Users, TrendingUp, TrendingDown,
-    ArrowUpRight, ArrowDownRight, UserPlus, UserMinus, X, Filter, Loader2,
+    ArrowUpRight, ArrowDownRight, UserPlus, UserMinus, X, Loader2,
     BarChart3, Calendar, SlidersHorizontal, FileSearch
 } from 'lucide-react'
 
@@ -138,27 +141,17 @@ export default function InformesVentas() {
         return p
     }, [anio1, anio2, mesesSel, familia, subfamilia, articulo, marca, tipoArticulo, tipoCliente, agente, poblacion, cpostal, ocultarObsoletos])
 
-    const cargar = () => {
-        setParams(buildParams())
-        setLoadKey(k => k + 1)
-    }
-
-    // Auto-reload cuando cambian filtros de tipo select (solo tras primera carga)
-    const hasLoaded = useRef(false)
+    // Auto-carga al entrar y cada vez que cambie cualquier filtro o año
     useEffect(() => {
-        if (loadKey > 0) hasLoaded.current = true
-    }, [loadKey])
-    useEffect(() => {
-        if (!hasLoaded.current) return
         setParams(buildParams())
         setLoadKey(k => k + 1)
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [familia, subfamilia, marca, tipoArticulo, tipoCliente, agente, poblacion, cpostal, ocultarObsoletos, mesesSel])
+    }, [anio1, anio2, familia, subfamilia, marca, tipoArticulo, tipoCliente, agente, poblacion, cpostal, ocultarObsoletos, mesesSel])
 
     const toggleMes = (m: number) => setMesesSel(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m])
 
     return (
-        <div className="flex flex-col h-screen max-w-7xl mx-auto">
+        <div className="flex flex-col h-screen max-w-[1400px] mx-auto">
             {/* Header */}
             <div className="bg-white shadow-sm flex-shrink-0">
                 {/* Title bar */}
@@ -181,26 +174,21 @@ export default function InformesVentas() {
                             <input type="number" value={anio2} onChange={e => setAnio2(+e.target.value)}
                                 className="w-16 text-xs font-medium text-center border border-slate-200 rounded-md py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
                         </div>
-                        <button onClick={cargar}
-                            className="btn-primary !py-1.5 !px-4 text-xs flex items-center gap-1.5 rounded-md shadow-sm">
-                            <Filter className="w-3.5 h-3.5" /> Cargar
-                        </button>
                     </div>
                 </div>
                 {/* Tabs */}
-                <div className="px-5 flex items-center gap-0.5 border-b border-slate-200">
-                    {TABS.map(t => (
-                        <button key={t.key} onClick={() => setTab(t.key)}
-                            className={`px-3.5 py-2 text-xs font-medium transition-all relative
-                                ${tab === t.key
-                                    ? 'text-blue-700'
-                                    : 'text-slate-400 hover:text-slate-600'}`}>
-                            {t.label}
-                            {tab === t.key && (
-                                <span className="absolute bottom-0 left-1 right-1 h-[2px] bg-blue-600 rounded-full" />
-                            )}
-                        </button>
-                    ))}
+                <div className="px-5 flex items-center justify-center gap-0.5 border-b border-slate-200">
+                    <div className="flex items-center gap-0.5 bg-blue-50 rounded-t-lg px-1 pt-0.5">
+                        {TABS.map(t => (
+                            <button key={t.key} onClick={() => setTab(t.key)}
+                                className={`px-3.5 py-2 text-xs font-medium transition-all rounded-t-md
+                                    ${tab === t.key
+                                        ? 'bg-white text-blue-700 shadow-sm border border-b-0 border-slate-200'
+                                        : 'text-slate-500 hover:text-blue-600 hover:bg-blue-100/50'}`}>
+                                {t.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
 
@@ -355,7 +343,7 @@ function EmptyState() {
             <FileSearch className="w-10 h-10 stroke-[1.2]" />
             <div className="text-center">
                 <p className="text-sm font-medium text-slate-400">Sin datos</p>
-                <p className="text-xs text-slate-300 mt-0.5">Configura los filtros y pulsa <strong className="text-blue-500">Cargar</strong></p>
+                <p className="text-xs text-slate-300 mt-0.5">Los datos se cargarán automáticamente</p>
             </div>
         </div>
     )
@@ -384,11 +372,14 @@ function TabClientes({ visible, params, loadKey, anio1, anio2, busqueda, setBusq
     const [loaded, setLoaded] = useState(false)
     const lastKey = useRef(0)
 
-    // Detalle modal
-    const [detalleModal, setDetalleModal] = useState<{ codigo: number; nombre: string } | null>(null)
-    const [detalle, setDetalle] = useState<DetalleItem[]>([])
-    const [detalleLoading, setDetalleLoading] = useState(false)
+    // Tree expansion per client
+    const [expandedCli, setExpandedCli] = useState<Set<number>>(new Set())
+    const [detalleCache, setDetalleCache] = useState<Record<number, DetalleItem[]>>({})
+    const [detalleLoading, setDetalleLoading] = useState<Set<number>>(new Set())
     const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+    // FichaCliente modal
+    const [fichaCliente, setFichaCliente] = useState<{ codigo: number; nombre: string } | null>(null)
 
     useEffect(() => {
         if (visible && loadKey > 0 && loadKey !== lastKey.current) {
@@ -404,20 +395,26 @@ function TabClientes({ visible, params, loadKey, anio1, anio2, busqueda, setBusq
             setData(d.clientes)
             setResumen(d.resumen)
             setLoaded(true)
+            setExpandedCli(new Set()); setDetalleCache({}); setExpanded(new Set())
         } catch (e) { console.error(e) }
         finally { setLoading(false) }
     }
 
-    const openDetalle = async (c: ClienteRow) => {
-        setDetalleModal({ codigo: c.cli_codigo, nombre: c.cli_nombre })
-        setDetalleLoading(true); setExpanded(new Set())
-        try {
-            const p: Record<string, string> = { cli_codigo: String(c.cli_codigo), anio1: String(anio1), anio2: String(anio2) }
-            if (mesesSel.length > 0) p.meses = mesesSel.join(',')
-            const { data: d } = await api.get('/api/informes/comparativa-cliente-detalle', { params: p })
-            setDetalle(d.detalle)
-        } catch (e) { console.error(e) }
-        finally { setDetalleLoading(false) }
+    const toggleCliente = async (c: ClienteRow) => {
+        const code = c.cli_codigo
+        setExpandedCli(prev => {
+            const n = new Set(prev); n.has(code) ? n.delete(code) : n.add(code); return n
+        })
+        if (!detalleCache[code] && !detalleLoading.has(code)) {
+            setDetalleLoading(prev => { const n = new Set(prev); n.add(code); return n })
+            try {
+                const p: Record<string, string> = { cli_codigo: String(code), anio1: String(anio1), anio2: String(anio2) }
+                if (mesesSel.length > 0) p.meses = mesesSel.join(',')
+                const { data: d } = await api.get('/api/informes/comparativa-cliente-detalle', { params: p })
+                setDetalleCache(prev => ({ ...prev, [code]: d.detalle }))
+            } catch (e) { console.error(e) }
+            finally { setDetalleLoading(prev => { const n = new Set(prev); n.delete(code); return n }) }
+        }
     }
 
     const filtered = busqueda
@@ -428,9 +425,9 @@ function TabClientes({ visible, params, loadKey, anio1, anio2, busqueda, setBusq
         const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n
     })
 
-    const buildTree = () => {
+    const buildTree = (items: DetalleItem[]) => {
         const tree: Record<string, { items: Record<string, { arts: DetalleItem[]; imp1: number; imp2: number; uds1: number; uds2: number }>; imp1: number; imp2: number; uds1: number; uds2: number }> = {}
-        for (const d of detalle) {
+        for (const d of items) {
             const fk = d.familia, sfk = d.subfamilia || '(sin subfamilia)'
             if (!tree[fk]) tree[fk] = { items: {}, imp1: 0, imp2: 0, uds1: 0, uds2: 0 }
             if (!tree[fk].items[sfk]) tree[fk].items[sfk] = { arts: [], imp1: 0, imp2: 0, uds1: 0, uds2: 0 }
@@ -463,50 +460,94 @@ function TabClientes({ visible, params, loadKey, anio1, anio2, busqueda, setBusq
             <div className="flex flex-1 overflow-hidden">
                 <div className="flex-1 overflow-auto">
                     {!loaded && !loading ? <EmptyState /> : loading ? <LoadingState /> : (
-                        <table className="w-full text-xs">
-                            <thead className="sticky top-0 z-10">
-                                <tr className="bg-slate-50/90 backdrop-blur-sm border-b border-slate-200 text-slate-500">
-                                    <th className="text-left py-2.5 px-3 font-semibold text-[10px] uppercase tracking-wider">Cliente</th>
-                                    <th className="text-right py-2.5 px-2 font-semibold text-[10px] uppercase tracking-wider">Ventas {anio1}</th>
-                                    <th className="text-right py-2.5 px-2 font-semibold text-[10px] uppercase tracking-wider">Ventas {anio2}</th>
-                                    {data.some(c => c.uds_anio1 !== null) && <>
-                                        <th className="text-right py-2.5 px-2 font-semibold text-[10px] uppercase tracking-wider">Uds {anio1}</th>
-                                        <th className="text-right py-2.5 px-2 font-semibold text-[10px] uppercase tracking-wider">Uds {anio2}</th>
-                                    </>}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filtered.map(c => {
-                                    const hasUds = c.uds_anio1 !== null
-                                    const col = c.ventas_anio1 > 0 && c.ventas_anio2 === 0 ? 'text-red-500'
-                                        : c.ventas_anio1 === 0 && c.ventas_anio2 > 0 ? 'text-green-600'
-                                            : colorVar(c.ventas_anio1, c.ventas_anio2)
-                                    return (
-                                        <tr key={c.cli_codigo} className={`border-b border-slate-50 hover:bg-blue-50 cursor-pointer ${col}`}
-                                            onClick={() => openDetalle(c)}>
-                                            <td className="py-1 px-3 truncate max-w-[250px]" title={c.cli_nombre}>{c.cli_nombre}</td>
-                                            <td className="text-right py-1 px-2 font-medium">{c.ventas_anio1 > 0 ? `${fmt(c.ventas_anio1)} €` : ''}</td>
-                                            <td className="text-right py-1 px-2 font-medium">{c.ventas_anio2 > 0 ? `${fmt(c.ventas_anio2)} €` : ''}</td>
-                                            {hasUds && <>
-                                                <td className="text-right py-1 px-2">{(c.uds_anio1 ?? 0) > 0 ? fmtInt(c.uds_anio1!) : ''}</td>
-                                                <td className="text-right py-1 px-2">{(c.uds_anio2 ?? 0) > 0 ? fmtInt(c.uds_anio2!) : ''}</td>
-                                            </>}
-                                        </tr>
-                                    )
-                                })}
-                            </tbody>
-                            {filtered.length > 0 && (
-                                <tfoot><tr className="border-t-2 border-slate-300 font-bold bg-slate-50 sticky bottom-0">
-                                    <td className="py-2 px-3">TOTAL</td>
-                                    <td className="text-right py-2 px-2">{fmt(filtered.reduce((a, c) => a + c.ventas_anio1, 0))} €</td>
-                                    <td className="text-right py-2 px-2">{fmt(filtered.reduce((a, c) => a + c.ventas_anio2, 0))} €</td>
-                                    {data.some(c => c.uds_anio1 !== null) && <>
-                                        <td className="text-right py-2 px-2">{fmtInt(filtered.reduce((a, c) => a + (c.uds_anio1 ?? 0), 0))}</td>
-                                        <td className="text-right py-2 px-2">{fmtInt(filtered.reduce((a, c) => a + (c.uds_anio2 ?? 0), 0))}</td>
-                                    </>}
-                                </tr></tfoot>
-                            )}
-                        </table>
+                        <div className="text-xs">
+                            {filtered.map(c => {
+                                const isOpen = expandedCli.has(c.cli_codigo)
+                                const col = c.ventas_anio1 > 0 && c.ventas_anio2 === 0 ? 'text-red-500'
+                                    : c.ventas_anio1 === 0 && c.ventas_anio2 > 0 ? 'text-green-600'
+                                        : colorVar(c.ventas_anio1, c.ventas_anio2)
+                                const cliDetalle = detalleCache[c.cli_codigo]
+                                const cliLoading = detalleLoading.has(c.cli_codigo)
+                                return (
+                                    <div key={c.cli_codigo}>
+                                        {/* Client row */}
+                                        <div className={`grid grid-cols-[1fr_120px_120px] gap-1 py-1.5 px-3 cursor-pointer hover:bg-blue-50 font-semibold border-b border-slate-200 ${col}`}
+                                            onClick={() => toggleCliente(c)}>
+                                            <div className="flex items-center gap-1">
+                                                {isOpen ? <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />}
+                                                <span className="truncate hover:underline text-blue-700 hover:text-blue-900"
+                                                    title="Abrir ficha de cliente"
+                                                    onClick={e => { e.stopPropagation(); setFichaCliente({ codigo: c.cli_codigo, nombre: c.cli_nombre }) }}>
+                                                    {c.cli_nombre}
+                                                </span>
+                                            </div>
+                                            <div className="text-right">
+                                                {c.ventas_anio1 > 0 ? `${fmt(c.ventas_anio1)} €` : ''}
+                                            </div>
+                                            <div className="text-right">
+                                                {c.ventas_anio2 > 0 ? `${fmt(c.ventas_anio2)} €` : ''}
+                                            </div>
+                                        </div>
+                                        {/* Inline tree: Familia > Subfamilia > Artículo */}
+                                        {isOpen && (
+                                            <div className="bg-slate-50/50">
+                                                {cliLoading ? (
+                                                    <div className="text-center text-slate-400 py-3 text-[11px]">Cargando detalle...</div>
+                                                ) : cliDetalle ? (
+                                                    <div className="ml-6">
+                                                        {Object.entries(buildTree(cliDetalle)).sort(([a], [b]) => a.localeCompare(b)).map(([fam, fN]) => {
+                                                            const fKey = `${c.cli_codigo}:f:${fam}`
+                                                            return (
+                                                                <div key={fam}>
+                                                                    <div className="grid grid-cols-[1fr_100px_100px_70px_70px] gap-1 py-1 px-2 cursor-pointer hover:bg-slate-100 font-semibold text-slate-700 border-b border-slate-100"
+                                                                        onClick={() => toggle(fKey)}>
+                                                                        <div className="flex items-center gap-1">
+                                                                            {expanded.has(fKey) ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}{fam}
+                                                                        </div>
+                                                                        <div className="text-right">{fN.imp1 ? `${fmt(fN.imp1)} €` : ''}</div>
+                                                                        <div className="text-right">{fN.imp2 ? `${fmt(fN.imp2)} €` : ''}</div>
+                                                                        <div className="text-right">{fN.uds1 ? fmtInt(fN.uds1) : ''}</div>
+                                                                        <div className="text-right">{fN.uds2 ? fmtInt(fN.uds2) : ''}</div>
+                                                                    </div>
+                                                                    {expanded.has(fKey) && Object.entries(fN.items).sort(([a], [b]) => a.localeCompare(b)).map(([sf, sfN]) => {
+                                                                        const sfKey = `${c.cli_codigo}:sf:${fam}:${sf}`
+                                                                        return (
+                                                                            <div key={sf} className="ml-4">
+                                                                                <div className="grid grid-cols-[1fr_100px_100px_70px_70px] gap-1 py-0.5 px-2 cursor-pointer hover:bg-slate-100 font-medium text-slate-600 border-b border-slate-50"
+                                                                                    onClick={() => toggle(sfKey)}>
+                                                                                    <div className="flex items-center gap-1">
+                                                                                        {expanded.has(sfKey) ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}{sf}
+                                                                                    </div>
+                                                                                    <div className="text-right">{sfN.imp1 ? `${fmt(sfN.imp1)} €` : ''}</div>
+                                                                                    <div className="text-right">{sfN.imp2 ? `${fmt(sfN.imp2)} €` : ''}</div>
+                                                                                    <div className="text-right">{sfN.uds1 ? fmtInt(sfN.uds1) : ''}</div>
+                                                                                    <div className="text-right">{sfN.uds2 ? fmtInt(sfN.uds2) : ''}</div>
+                                                                                </div>
+                                                                                {expanded.has(sfKey) && sfN.arts.sort((a, b) => a.descripcion.localeCompare(b.descripcion)).map((art, i) => (
+                                                                                    <div key={i} className="grid grid-cols-[1fr_100px_100px_70px_70px] gap-1 py-0.5 px-2 ml-4 text-slate-500 border-b border-slate-50 hover:bg-slate-50">
+                                                                                        <div className="truncate" title={`${art.referencia} - ${art.descripcion}`}>
+                                                                                            <span className="font-mono text-slate-400 mr-1">{art.referencia}</span>{art.descripcion}
+                                                                                        </div>
+                                                                                        <div className="text-right">{art.importe_anio1 ? `${fmt(art.importe_anio1)} €` : ''}</div>
+                                                                                        <div className="text-right">{art.importe_anio2 ? `${fmt(art.importe_anio2)} €` : ''}</div>
+                                                                                        <div className="text-right">{art.uds_anio1 ? fmtInt(art.uds_anio1) : ''}</div>
+                                                                                        <div className="text-right">{art.uds_anio2 ? fmtInt(art.uds_anio2) : ''}</div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        )
+                                                                    })}
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            })}
+                        </div>
                     )}
                 </div>
 
@@ -544,68 +585,14 @@ function TabClientes({ visible, params, loadKey, anio1, anio2, busqueda, setBusq
                 )}
             </div>
 
-            {/* Detalle Modal */}
-            {detalleModal && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setDetalleModal(null)}>
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[85vh] flex flex-col ring-1 ring-black/5" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50/50 rounded-t-xl">
-                            <h2 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                                <Users className="w-4 h-4 text-blue-500" />
-                                {detalleModal.nombre}
-                            </h2>
-                            <button onClick={() => setDetalleModal(null)} className="text-slate-300 hover:text-slate-500 transition-colors"><X className="w-5 h-5" /></button>
-                        </div>
-                        <div className="overflow-auto flex-1 p-4">
-                            {detalleLoading ? <div className="text-center text-slate-400 py-8">Cargando...</div> : (
-                                <div className="text-xs">
-                                    <div className="grid grid-cols-[1fr_100px_100px_70px_70px] gap-1 font-semibold text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200 pb-2 mb-1">
-                                        <div>Artículo</div><div className="text-right">Ventas {anio1}</div><div className="text-right">Ventas {anio2}</div>
-                                        <div className="text-right">Uds {anio1}</div><div className="text-right">Uds {anio2}</div>
-                                    </div>
-                                    {Object.entries(buildTree()).sort(([a], [b]) => a.localeCompare(b)).map(([fam, fN]) => (
-                                        <div key={fam}>
-                                            <div className="grid grid-cols-[1fr_100px_100px_70px_70px] gap-1 py-1 cursor-pointer hover:bg-slate-50 font-semibold text-slate-700 border-b border-slate-100"
-                                                onClick={() => toggle(`f:${fam}`)}>
-                                                <div className="flex items-center gap-1">
-                                                    {expanded.has(`f:${fam}`) ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}{fam}
-                                                </div>
-                                                <div className="text-right">{fN.imp1 ? `${fmt(fN.imp1)} €` : ''}</div>
-                                                <div className="text-right">{fN.imp2 ? `${fmt(fN.imp2)} €` : ''}</div>
-                                                <div className="text-right">{fN.uds1 ? fmtInt(fN.uds1) : ''}</div>
-                                                <div className="text-right">{fN.uds2 ? fmtInt(fN.uds2) : ''}</div>
-                                            </div>
-                                            {expanded.has(`f:${fam}`) && Object.entries(fN.items).sort(([a], [b]) => a.localeCompare(b)).map(([sf, sfN]) => (
-                                                <div key={sf} className="ml-4">
-                                                    <div className="grid grid-cols-[1fr_100px_100px_70px_70px] gap-1 py-0.5 cursor-pointer hover:bg-slate-50 font-medium text-slate-600 border-b border-slate-50"
-                                                        onClick={() => toggle(`sf:${fam}:${sf}`)}>
-                                                        <div className="flex items-center gap-1">
-                                                            {expanded.has(`sf:${fam}:${sf}`) ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}{sf}
-                                                        </div>
-                                                        <div className="text-right">{sfN.imp1 ? `${fmt(sfN.imp1)} €` : ''}</div>
-                                                        <div className="text-right">{sfN.imp2 ? `${fmt(sfN.imp2)} €` : ''}</div>
-                                                        <div className="text-right">{sfN.uds1 ? fmtInt(sfN.uds1) : ''}</div>
-                                                        <div className="text-right">{sfN.uds2 ? fmtInt(sfN.uds2) : ''}</div>
-                                                    </div>
-                                                    {expanded.has(`sf:${fam}:${sf}`) && sfN.arts.sort((a, b) => a.descripcion.localeCompare(b.descripcion)).map((art, i) => (
-                                                        <div key={i} className="grid grid-cols-[1fr_100px_100px_70px_70px] gap-1 py-0.5 ml-4 text-slate-500 border-b border-slate-50 hover:bg-slate-50">
-                                                            <div className="truncate" title={`${art.referencia} - ${art.descripcion}`}>
-                                                                <span className="font-mono text-slate-400 mr-1">{art.referencia}</span>{art.descripcion}
-                                                            </div>
-                                                            <div className="text-right">{art.importe_anio1 ? `${fmt(art.importe_anio1)} €` : ''}</div>
-                                                            <div className="text-right">{art.importe_anio2 ? `${fmt(art.importe_anio2)} €` : ''}</div>
-                                                            <div className="text-right">{art.uds_anio1 ? fmtInt(art.uds_anio1) : ''}</div>
-                                                            <div className="text-right">{art.uds_anio2 ? fmtInt(art.uds_anio2) : ''}</div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            ))}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
+            {/* FichaCliente Modal */}
+            {fichaCliente && (
+                <FichaCliente
+                    cliCodigo={fichaCliente.codigo}
+                    cliNombre={fichaCliente.nombre}
+                    initialAnio={anio2}
+                    onClose={() => setFichaCliente(null)}
+                />
             )}
         </>
     )
@@ -624,6 +611,10 @@ function TabAgentes({ visible, params, loadKey, anio1, anio2, busqueda, setBusqu
     const [loaded, setLoaded] = useState(false)
     const lastKey = useRef(0)
     const [expanded, setExpanded] = useState<Set<number>>(new Set())
+
+    // Modales
+    const [fichaAgente, setFichaAgente] = useState<{ codigo: number; nombre: string } | null>(null)
+    const [fichaCliente, setFichaCliente] = useState<{ codigo: number; nombre: string } | null>(null)
 
     useEffect(() => {
         if (visible && loadKey > 0 && loadKey !== lastKey.current) {
@@ -666,8 +657,12 @@ function TabAgentes({ visible, params, loadKey, anio1, anio2, busqueda, setBusqu
                                     <div className={`grid grid-cols-[1fr_120px_120px_120px] gap-1 py-1.5 px-3 cursor-pointer hover:bg-blue-50 font-semibold border-b border-slate-200 ${col}`}
                                         onClick={() => toggle(ag.agente_codigo)}>
                                         <div className="flex items-center gap-1">
-                                            {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-                                            {ag.agente_nombre}
+                                            {isOpen ? <ChevronDown className="w-3.5 h-3.5 flex-shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" />}
+                                            <span className="truncate hover:underline text-blue-700 hover:text-blue-900"
+                                                title="Abrir ficha de agente"
+                                                onClick={e => { e.stopPropagation(); setFichaAgente({ codigo: ag.agente_codigo, nombre: ag.agente_nombre }) }}>
+                                                {ag.agente_nombre}
+                                            </span>
                                         </div>
                                         <div className="text-right">
                                             <span className="text-slate-400 mr-1">Ventas {anio1}:</span>{fmt(ag.ventas_anio1)} €
@@ -688,7 +683,10 @@ function TabAgentes({ visible, params, loadKey, anio1, anio2, busqueda, setBusqu
                                         return (
                                             <div key={c.cli_codigo}
                                                 className={`grid grid-cols-[1fr_120px_120px_120px] gap-1 py-1 px-3 pl-10 border-b border-slate-50 hover:bg-slate-50 ${cc}`}>
-                                                <div className="truncate">{c.cli_nombre}</div>
+                                                <div className="truncate cursor-pointer hover:underline text-blue-700 hover:text-blue-900"
+                                                    onClick={() => setFichaCliente({ codigo: c.cli_codigo, nombre: c.cli_nombre })}>
+                                                    {c.cli_nombre}
+                                                </div>
                                                 <div className="text-right">{c.ventas_anio1 ? `${fmt(c.ventas_anio1)} €` : '0,00 €'}</div>
                                                 <div className="text-right">{c.ventas_anio2 ? `${fmt(c.ventas_anio2)} €` : '0,00 €'}</div>
                                                 <div className="text-right">
@@ -703,6 +701,26 @@ function TabAgentes({ visible, params, loadKey, anio1, anio2, busqueda, setBusqu
                     </div>
                 )}
             </div>
+
+            {/* FichaAgente Modal */}
+            {fichaAgente && (
+                <FichaAgente
+                    agenteCodigo={fichaAgente.codigo}
+                    agenteNombre={fichaAgente.nombre}
+                    initialAnio={anio2}
+                    onClose={() => setFichaAgente(null)}
+                />
+            )}
+
+            {/* FichaCliente Modal */}
+            {fichaCliente && (
+                <FichaCliente
+                    cliCodigo={fichaCliente.codigo}
+                    cliNombre={fichaCliente.nombre}
+                    initialAnio={anio2}
+                    onClose={() => setFichaCliente(null)}
+                />
+            )}
         </>
     )
 }
@@ -720,6 +738,7 @@ function TabArticulos({ visible, params, loadKey, anio1, anio2, busqueda, setBus
     const [loaded, setLoaded] = useState(false)
     const lastKey = useRef(0)
     const [expanded, setExpanded] = useState<Set<string>>(new Set())
+    const [fichaArticulo, setFichaArticulo] = useState<{ referencia: string; descripcion: string } | null>(null)
 
     useEffect(() => {
         if (visible && loadKey > 0 && loadKey !== lastKey.current) {
@@ -754,6 +773,7 @@ function TabArticulos({ visible, params, loadKey, anio1, anio2, busqueda, setBus
                     <div className="text-xs">
                         {/* Header */}
                         <div className="grid grid-cols-[1fr_100px_100px_70px_70px_70px] gap-1 px-3 py-2.5 font-semibold text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200 bg-slate-50/90 backdrop-blur-sm sticky top-0 z-10">
+
                             <div>Artículo</div>
                             <div className="text-right">{anio1} €</div>
                             <div className="text-right">{anio2} €</div>
@@ -770,7 +790,11 @@ function TabArticulos({ visible, params, loadKey, anio1, anio2, busqueda, setBus
                                         onClick={() => toggle(art.referencia)}>
                                         <div className="flex items-center gap-1 truncate">
                                             {art.clientes.length > 0 && (isOpen ? <ChevronDown className="w-3 h-3 flex-shrink-0" /> : <ChevronRight className="w-3 h-3 flex-shrink-0" />)}
-                                            <span className="truncate" title={`${art.referencia} - ${art.descripcion}`}>{art.descripcion || art.referencia}</span>
+                                            <span className="truncate hover:underline text-blue-700 hover:text-blue-900 cursor-pointer"
+                                                title="Abrir ficha del artículo"
+                                                onClick={e => { e.stopPropagation(); setFichaArticulo({ referencia: art.referencia, descripcion: art.descripcion }) }}>
+                                                {art.descripcion || art.referencia}
+                                            </span>
                                         </div>
                                         <div className="text-right font-medium">{art.importe_anio1 ? `${fmt(art.importe_anio1)} €` : '0,00 €'}</div>
                                         <div className="text-right font-medium">{art.importe_anio2 ? `${fmt(art.importe_anio2)} €` : '0,00 €'}</div>
@@ -802,6 +826,15 @@ function TabArticulos({ visible, params, loadKey, anio1, anio2, busqueda, setBus
                     </div>
                 )}
             </div>
+
+            {fichaArticulo && (
+                <FichaArticulo
+                    referencia={fichaArticulo.referencia}
+                    descripcion={fichaArticulo.descripcion}
+                    initialAnio={anio2}
+                    onClose={() => setFichaArticulo(null)}
+                />
+            )}
         </>
     )
 }

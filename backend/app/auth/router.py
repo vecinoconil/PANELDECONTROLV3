@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import json
+
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from jose import JWTError
 from sqlalchemy import asc
 from sqlmodel import Session, select
@@ -13,6 +15,7 @@ from app.auth.service import (
 from app.database import get_session
 from app.models.app_models import Local, Usuario, UsuarioLocal
 from app.schemas import LoginRequest, RefreshRequest, TokenResponse, UserMe, LocalInfo
+from app.services.email import send_password_recovery
 
 router = APIRouter()
 
@@ -53,6 +56,22 @@ def refresh(body: RefreshRequest, session: Session = Depends(get_session)):
     )
 
 
+@router.post("/recover-password", status_code=status.HTTP_200_OK)
+def recover_password(
+    email: str = Body(..., embed=True),
+    session: Session = Depends(get_session),
+):
+    user = session.exec(select(Usuario).where(Usuario.email == email)).first()
+    # Always return OK to avoid email enumeration
+    if not user or not user.plain_password:
+        return {"ok": True, "message": "Si el email está registrado, recibirás un correo"}
+    try:
+        send_password_recovery(user.email, user.nombre, user.plain_password)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error enviando email: {e}")
+    return {"ok": True, "message": "Si el email está registrado, recibirás un correo"}
+
+
 @router.get("/me", response_model=UserMe)
 def me(current_user: Usuario = Depends(get_current_user), session: Session = Depends(get_session)):
     if current_user.rol == "superadmin":
@@ -68,11 +87,19 @@ def me(current_user: Usuario = Depends(get_current_user), session: Session = Dep
         local_ids = sorted([ul.local_id for ul in assigned])
         locales = [session.get(Local, lid) for lid in local_ids if session.get(Local, lid)]
 
+    empresa_nombre = None
+    if current_user.empresa_id:
+        from app.models.app_models import Empresa
+        emp = session.get(Empresa, current_user.empresa_id)
+        empresa_nombre = emp.nombre if emp else None
+
     return UserMe(
         id=current_user.id,
         email=current_user.email,
         nombre=current_user.nombre,
         rol=current_user.rol,
         empresa_id=current_user.empresa_id,
+        empresa_nombre=empresa_nombre,
         locales=[LocalInfo.model_validate(l) for l in locales],
+        permisos=json.loads(current_user.permisos or '[]'),
     )
