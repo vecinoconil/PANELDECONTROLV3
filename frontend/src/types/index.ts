@@ -11,11 +11,29 @@ export interface UserMe {
     empresa_id: number | null
     empresa_nombre: string | null
     locales: LocalInfo[]
-    permisos: string[]
+    permisos: PermisosMap
     agente_autoventa: number | null
     serie_autoventa: string | null
     autoventa_modifica_precio: boolean
     fpagos_autoventa: number[]
+}
+
+export interface PermisoFlags {
+    ver: boolean
+    entrar: boolean
+}
+
+export type PermisosMap = Record<string, PermisoFlags>
+
+export function hasPermiso(
+    permisos: PermisosMap | undefined,
+    key: string,
+    action: 'ver' | 'entrar' = 'entrar',
+): boolean {
+    if (!permisos) return false
+    const p = permisos[key]
+    if (!p) return false
+    return action === 'ver' ? !!p.ver : !!p.entrar
 }
 
 export const PERMISOS_DISPONIBLES = [
@@ -23,6 +41,9 @@ export const PERMISOS_DISPONIBLES = [
     { key: 'comparativa_ventas', label: 'Comparativa Ventas' },
     { key: 'contabilidad',       label: 'Contabilidad' },
     { key: 'autoventa',          label: 'Autoventa' },
+    { key: 'admin_empresas',     label: 'Admin Empresas' },
+    { key: 'admin_locales',      label: 'Admin Locales' },
+    { key: 'admin_usuarios',     label: 'Admin Usuarios' },
 ] as const
 
 export interface TokenResponse {

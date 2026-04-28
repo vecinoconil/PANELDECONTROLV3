@@ -14,7 +14,7 @@ from app.auth.service import (
 )
 from app.database import get_session
 from app.models.app_models import Local, Usuario, UsuarioLocal
-from app.schemas import LoginRequest, RefreshRequest, TokenResponse, UserMe, LocalInfo
+from app.schemas import LoginRequest, RefreshRequest, TokenResponse, UserMe, LocalInfo, normalize_permisos
 from app.services.email import send_password_recovery
 
 router = APIRouter()
@@ -101,5 +101,5 @@ def me(current_user: Usuario = Depends(get_current_user), session: Session = Dep
         empresa_id=current_user.empresa_id,
         empresa_nombre=empresa_nombre,
         locales=[LocalInfo.model_validate(l) for l in locales],
-        permisos=json.loads(current_user.permisos or '[]'),
+        permisos=normalize_permisos(current_user.permisos or '{}'),
     )

@@ -19,13 +19,27 @@ export default function App() {
                     <Route path="/login" element={<Login />} />
                     <Route element={<ProtectedRoute />}>
                         <Route element={<Layout />}>
-                            <Route path="/dashboard" element={<Dashboard />} />
-                            <Route path="/informes/comparativa-ventas" element={<InformesVentas />} />
-                            <Route path="/contabilidad/libro-iva" element={<LibroIVA />} />
-                            <Route path="/admin/empresas" element={<Empresas />} />
-                            <Route path="/admin/locales" element={<Locales />} />
-                            <Route path="/admin/usuarios" element={<Usuarios />} />
-                            <Route path="/autoventa" element={<Autoventa />} />
+                            <Route element={<ProtectedRoute requiredPermission="dashboard" action="entrar" />}>
+                                <Route path="/dashboard" element={<Dashboard />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="comparativa_ventas" action="entrar" />}>
+                                <Route path="/informes/comparativa-ventas" element={<InformesVentas />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="contabilidad" action="entrar" />}>
+                                <Route path="/contabilidad/libro-iva" element={<LibroIVA />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="admin_empresas" action="entrar" />}>
+                                <Route path="/admin/empresas" element={<Empresas />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="admin_locales" action="entrar" />}>
+                                <Route path="/admin/locales" element={<Locales />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="admin_usuarios" action="entrar" />}>
+                                <Route path="/admin/usuarios" element={<Usuarios />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="autoventa" action="entrar" />}>
+                                <Route path="/autoventa" element={<Autoventa />} />
+                            </Route>
                         </Route>
                     </Route>
                     <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -14,7 +14,7 @@ from app.models.app_models import Empresa, Local, Usuario, UsuarioLocal
 from app.schemas import (
     EmpresaCreate, EmpresaRead, EmpresaUpdate,
     LocalCreate, LocalRead, LocalUpdate,
-    UsuarioCreate, UsuarioRead, UsuarioUpdate,
+    UsuarioCreate, UsuarioRead, UsuarioUpdate, normalize_permisos,
 )
 from app.services.email import send_credentials
 from app.services.pg_connection import get_pg_connection
@@ -40,7 +40,7 @@ def _usuario_to_read(user: Usuario, session: Session, *, include_password: bool 
     local_ids = [ul.local_id for ul in ul_rows]
     data = user.model_dump()
     data["local_ids"] = local_ids
-    data["permisos"] = json.loads(data.get("permisos") or "[]")
+    data["permisos"] = normalize_permisos(data.get("permisos") or "{}")
     data["fpagos_autoventa"] = json.loads(data.get("fpagos_autoventa") or "[]")
     if not include_password:
         data.pop("plain_password", None)
@@ -340,7 +340,7 @@ def create_usuario(
         hashed_password=hash_password(body.password),
         plain_password=body.password,
         rol=body.rol,
-        permisos=json.dumps(body.permisos),
+        permisos=json.dumps(normalize_permisos(body.permisos)),
         agente_autoventa=body.agente_autoventa,
         serie_autoventa=body.serie_autoventa,
         autoventa_modifica_precio=body.autoventa_modifica_precio,
@@ -380,7 +380,7 @@ def update_usuario(
     local_ids = update_data.pop("local_ids", None)
     password = update_data.pop("password", None)
     if "permisos" in update_data:
-        update_data["permisos"] = json.dumps(update_data["permisos"])
+        update_data["permisos"] = json.dumps(normalize_permisos(update_data["permisos"]))
     if "fpagos_autoventa" in update_data:
         update_data["fpagos_autoventa"] = json.dumps(update_data["fpagos_autoventa"] or [])
 

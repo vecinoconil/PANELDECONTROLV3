@@ -4,7 +4,7 @@ import { useAuth } from '../../auth/AuthContext'
 import { UserMe } from '../../types'
 import {
     ShoppingCart, FileText, Truck, Search, Calculator,
-    X, Check, Loader2, AlertCircle, CreditCard, ChevronDown, ChevronUp,
+    X, Check, Loader2, AlertCircle, CreditCard, ChevronDown, ChevronUp, Plus,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -31,6 +31,12 @@ interface ProductoConsumo {
     uds_total: number
     ultimo_precio: number
     ultima_fecha: string
+    piva: number
+}
+interface ArticuloBusqueda {
+    referencia: string
+    nombre: string
+    precio: number
     piva: number
 }
 interface LineaDoc {
@@ -142,6 +148,7 @@ export default function Autoventa() {
     const [searchingCliente, setSearchingCliente] = useState(false)
     const [clienteSeleccionado, setClienteSeleccionado] = useState<ClienteResult | null>(null)
     const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const searchSeq = useRef(0)
 
     // Products
     const [lineas, setLineas] = useState<LineaDoc[]>([])
@@ -156,6 +163,7 @@ export default function Autoventa() {
     const [loadingDocs, setLoadingDocs] = useState(false)
     const [soloPte, setSoloPte] = useState(true)
     const [expandedDoc, setExpandedDoc] = useState<number | null>(null)
+    const [docsClienteTarget, setDocsClienteTarget] = useState<ClienteResult | null>(null)
 
     // Cobrar modal
     const [cobrarTarget, setCobrarTarget] = useState<{
@@ -182,6 +190,13 @@ export default function Autoventa() {
     const [consultarQuery, setConsultarQuery] = useState('')
     const [consultarCliente, setConsultarCliente] = useState<ClienteResult | null>(null)
 
+    // Añadir artículo manualmente
+    const [showAddArticuloModal, setShowAddArticuloModal] = useState(false)
+    const [articuloQuery, setArticuloQuery] = useState('')
+    const [articuloResults, setArticuloResults] = useState<ArticuloBusqueda[]>([])
+    const [searchingArticulo, setSearchingArticulo] = useState(false)
+    const articuloSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
     // Submit
     const [submitting, setSubmitting] = useState(false)
     const [resultado, setResultado] = useState<{
@@ -195,6 +210,8 @@ export default function Autoventa() {
     const [postVentaEnviando, setPostVentaEnviando] = useState(false)
     const [postVentaEmailEnviado, setPostVentaEmailEnviado] = useState(false)
     const [postVentaEmailError, setPostVentaEmailError] = useState('')
+
+    const hasClienteContext = !!(clienteSeleccionado || consultarCliente || docsClienteTarget)
 
     // Load agente info + cache clientes on mount
     useEffect(() => {
@@ -213,6 +230,8 @@ export default function Autoventa() {
 
     // Client autocomplete – filter from cache first, fallback to API
     const handleClienteInput = (q: string) => {
+        searchSeq.current += 1
+        const mySeq = searchSeq.current
         setClienteQuery(q)
         setClienteSeleccionado(null)
         setLineas([])
@@ -233,6 +252,7 @@ export default function Autoventa() {
             setSearchingCliente(true)
             try {
                 const r = await api.get<ClienteResult[]>(`/api/autoventa/clientes/buscar?q=${encodeURIComponent(q)}`)
+                if (mySeq !== searchSeq.current) return
                 setClienteResults(r.data)
             } catch { /* keep cached results */ }
             finally { setSearchingCliente(false) }
@@ -240,9 +260,13 @@ export default function Autoventa() {
     }
 
     const selectCliente = async (c: ClienteResult) => {
+        // Invalidate any pending/in-flight search to avoid stale results reappearing.
+        searchSeq.current += 1
+        if (searchTimer.current) clearTimeout(searchTimer.current)
+        setSearchingCliente(false)
         setClienteSeleccionado(c)
         setClienteResults([])
-        setClienteQuery(c.nombre)
+        setClienteQuery('')
         setLoadingProductos(true)
         setLineas([])
         try {
@@ -282,10 +306,11 @@ export default function Autoventa() {
         api.get<FpagoOption[]>('/api/autoventa/formaspago').then(r => setFpagosDisponibles(r.data)).catch(() => {})
     }, [])
 
-    const openDocsModal = async (cli?: ClienteResult) => {
+    const openDocsModal = async (cli?: ClienteResult, setAsCurrent = true) => {
         const c = cli || clienteSeleccionado
         if (!c) return
-        if (cli) setClienteSeleccionado(cli)
+        if (cli && setAsCurrent) setClienteSeleccionado(cli)
+        setDocsClienteTarget(c)
         setShowDocsModal(true)
         setExpandedDoc(null)
         setDocsFiltraTipo('todos')
@@ -298,7 +323,7 @@ export default function Autoventa() {
     }
 
     const reloadDocs = async (pte: boolean, tipoFiltro?: 'todos' | '4' | '8') => {
-        const c = clienteSeleccionado
+        const c = docsClienteTarget || clienteSeleccionado
         if (!c) return
         setLoadingDocs(true)
         try {
@@ -310,6 +335,8 @@ export default function Autoventa() {
         finally { setLoadingDocs(false) }
     }
 
+    const totalPteCobro = docsCliente.reduce((acc, doc) => acc + (doc.pendiente || 0), 0)
+
     const openCobrar = (target: typeof cobrarTarget) => {
         setCobrarTarget(target)
         setCobrarFpago(fpagosDisponibles[0]?.codigo ?? null)
@@ -318,7 +345,8 @@ export default function Autoventa() {
     }
 
     const handleCobrar = async () => {
-        if (!cobrarTarget || !cobrarFpago || !clienteSeleccionado) return
+        const clienteCobro = docsClienteTarget || clienteSeleccionado
+        if (!cobrarTarget || !cobrarFpago || !clienteCobro) return
         const imp = parseFloat(cobrarImporte)
         if (isNaN(imp) || imp <= 0) { setCobrarError('Importe inválido'); return }
         if (imp > cobrarTarget.maxImporte + 0.01) { setCobrarError(`Máximo permitido: ${cobrarTarget.maxImporte.toFixed(2)}€`); return }
@@ -326,12 +354,12 @@ export default function Autoventa() {
         setCobrarError('')
         try {
             if (cobrarTarget.tipo === 'albaran') {
-                await api.post(`/api/autoventa/clientes/${clienteSeleccionado.codigo}/documentos/${cobrarTarget.idcab}/cobrar-albaran`, {
+                await api.post(`/api/autoventa/clientes/${clienteCobro.codigo}/documentos/${cobrarTarget.idcab}/cobrar-albaran`, {
                     fpago_codigo: cobrarFpago,
                     importe: imp,
                 })
             } else {
-                await api.post(`/api/autoventa/clientes/${clienteSeleccionado.codigo}/documentos/${cobrarTarget.idcab}/cobrar-vencimiento`, {
+                await api.post(`/api/autoventa/clientes/${clienteCobro.codigo}/documentos/${cobrarTarget.idcab}/cobrar-vencimiento`, {
                     vto_id: cobrarTarget.vtoId,
                     fpago_codigo: cobrarFpago,
                     importe: imp,
@@ -344,6 +372,40 @@ export default function Autoventa() {
         } finally {
             setCobrarLoading(false)
         }
+    }
+
+    const handleArticuloInput = (q: string) => {
+        setArticuloQuery(q)
+        setArticuloResults([])
+        if (articuloSearchTimer.current) clearTimeout(articuloSearchTimer.current)
+        if (q.length < 2 || !clienteSeleccionado) return
+        articuloSearchTimer.current = setTimeout(async () => {
+            setSearchingArticulo(true)
+            try {
+                const r = await api.get<ArticuloBusqueda[]>(
+                    `/api/autoventa/articulos/buscar?q=${encodeURIComponent(q)}&cli_codigo=${clienteSeleccionado.codigo}`
+                )
+                setArticuloResults(r.data)
+            } catch { setArticuloResults([]) }
+            finally { setSearchingArticulo(false) }
+        }, 300)
+    }
+
+    const addArticuloToLineas = (a: ArticuloBusqueda) => {
+        const existing = lineas.findIndex(l => l.referencia === a.referencia)
+        if (existing < 0) {
+            setLineas(prev => [...prev, {
+                referencia: a.referencia,
+                descripcion: a.nombre,
+                unidades: '1',
+                precio: a.precio,
+                piva: a.piva,
+                precioEditado: false,
+            }])
+        }
+        setShowAddArticuloModal(false)
+        setArticuloQuery('')
+        setArticuloResults([])
     }
 
     const handleSubmit = async () => {
@@ -412,8 +474,19 @@ export default function Autoventa() {
         setResultado(null)
         setTipodoc(null)
         setClienteQuery('')
+        setClienteResults([])
         setClienteSeleccionado(null)
         setLineas([])
+        setShowDocsModal(false)
+        setDocsCliente([])
+        setDocsClienteTarget(null)
+        setExpandedDoc(null)
+        setShowConsultarModal(false)
+        setConsultarCliente(null)
+        setConsultarQuery('')
+        setShowAddArticuloModal(false)
+        setArticuloQuery('')
+        setArticuloResults([])
         setError('')
     }
 
@@ -557,7 +630,7 @@ export default function Autoventa() {
 
     return (
         <div className="p-4 max-w-2xl mx-auto space-y-4">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <ShoppingCart className="w-5 h-5 text-brand" />
                 <h1 className="text-xl font-bold">Autoventa</h1>
                 {agenteNombre && (
@@ -565,12 +638,23 @@ export default function Autoventa() {
                         {agenteNombre}
                     </span>
                 )}
-                <button
-                    onClick={() => { setConsultarCliente(null); setConsultarQuery(''); setShowConsultarModal(true) }}
-                    className="ml-auto flex items-center gap-1.5 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-300 px-3 py-1.5 rounded-xl hover:bg-amber-100 transition-colors"
-                >
-                    <Search className="w-4 h-4" /> Consultar
-                </button>
+                <div className="ml-auto flex items-center gap-2">
+                    <button
+                        onClick={() => { setConsultarCliente(null); setConsultarQuery(''); setShowConsultarModal(true) }}
+                        className="flex items-center gap-1.5 text-sm font-medium text-amber-700 bg-amber-50 border border-amber-300 px-3 py-1.5 rounded-xl hover:bg-amber-100 transition-colors"
+                    >
+                        <Search className="w-4 h-4" /> Consultar
+                    </button>
+                    <button
+                        onClick={handleNuevo}
+                        disabled={!hasClienteContext}
+                        className="inline-flex items-center justify-center w-9 h-9 text-slate-700 bg-slate-100 border border-slate-300 rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        title="Cancelar"
+                        aria-label="Cancelar"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
             </div>
 
             {/* Step 1 – Tipo de documento */}
@@ -653,10 +737,20 @@ export default function Autoventa() {
             {/* Step 4 – Productos */}
             {clienteSeleccionado && (
                 <div className="card p-4">
-                    <p className="text-sm font-semibold text-slate-600 mb-3">
-                        3. Productos consumidos (últimos 90 días)
-                        {lineas.length > 0 && (
-                            <span className="ml-2 text-xs font-normal text-slate-400">{lineas.length} artículos</span>
+                    <p className="text-sm font-semibold text-slate-600 mb-3 flex items-center justify-between">
+                        <span>
+                            3. Productos consumidos (últimos 90 días)
+                            {lineas.length > 0 && (
+                                <span className="ml-2 text-xs font-normal text-slate-400">{lineas.length} artículos</span>
+                            )}
+                        </span>
+                        {clienteSeleccionado && !loadingProductos && (
+                            <button
+                                onClick={() => { setShowAddArticuloModal(true); setArticuloQuery(''); setArticuloResults([]) }}
+                                className="flex items-center gap-1 text-xs font-medium text-brand bg-brand/10 border border-brand/30 px-2.5 py-1 rounded-lg hover:bg-brand/20 transition-colors"
+                            >
+                                <Plus className="w-3.5 h-3.5" /> Añadir
+                            </button>
                         )}
                     </p>
 
@@ -666,9 +760,17 @@ export default function Autoventa() {
                             <span className="text-sm">Cargando productos...</span>
                         </div>
                     ) : lineas.length === 0 ? (
-                        <p className="text-sm text-slate-400 text-center py-6">
-                            Este cliente no tiene compras en los últimos 90 días.
-                        </p>
+                        <div className="flex flex-col items-center py-6 gap-3">
+                            <p className="text-sm text-slate-400 text-center">
+                                Este cliente no tiene compras en los últimos 90 días.
+                            </p>
+                            <button
+                                onClick={() => { setShowAddArticuloModal(true); setArticuloQuery(''); setArticuloResults([]) }}
+                                className="flex items-center gap-2 text-sm font-medium text-brand bg-brand/10 border border-brand/30 px-4 py-2 rounded-xl hover:bg-brand/20 transition-colors"
+                            >
+                                <Plus className="w-4 h-4" /> Añadir artículo
+                            </button>
+                        </div>
                     ) : (
                         <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
                             {lineas.map((l, idx) => {
@@ -778,12 +880,19 @@ export default function Autoventa() {
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
                         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
                             <h2 className="text-base font-bold text-slate-800">
-                                Documentos – {clienteSeleccionado?.nombre}
+                                Documentos – {docsClienteTarget?.nombre}
                             </h2>
-                            <button onClick={() => setShowDocsModal(false)} className="p-1 rounded hover:bg-slate-100">
+                            <button onClick={() => { setShowDocsModal(false); setDocsClienteTarget(null) }} className="p-1 rounded hover:bg-slate-100">
                                 <X className="w-5 h-5 text-slate-500" />
                             </button>
                         </div>
+                        {!loadingDocs && docsCliente.length > 0 && (
+                            <div className="px-4 py-2 border-b border-slate-100 bg-amber-50/70">
+                                <p className="text-xs font-medium text-amber-800">
+                                    Total pendiente de cobro: {totalPteCobro.toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
+                                </p>
+                            </div>
+                        )}
                         <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-3 flex-wrap">
                             <label className="flex items-center gap-2 cursor-pointer select-none text-sm text-slate-700">
                                 <input
@@ -996,7 +1105,7 @@ export default function Autoventa() {
                                                     <button key={c.codigo} onClick={() => {
                                                         setConsultarCliente(c)
                                                         setShowConsultarModal(false)
-                                                        openDocsModal(c)
+                                                        openDocsModal(c, false)
                                                     }} className="w-full text-left px-3 py-2 hover:bg-brand/5 border-b border-slate-100 last:border-0">
                                                         <p className="text-sm font-medium text-slate-800">{c.nombre}</p>
                                                         <p className="text-xs text-slate-400">{c.localidad} · {c.cif}</p>
@@ -1019,6 +1128,57 @@ export default function Autoventa() {
                                         <X className="w-3.5 h-3.5 text-slate-400" />
                                     </button>
                                 </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Modal Añadir Artículo ── */}
+            {showAddArticuloModal && clienteSeleccionado && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-6 px-2 pb-6 overflow-y-auto">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+                        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+                            <h2 className="text-base font-bold text-slate-800">Añadir artículo</h2>
+                            <button onClick={() => { setShowAddArticuloModal(false); setArticuloQuery(''); setArticuloResults([]) }} className="p-1 rounded hover:bg-slate-100">
+                                <X className="w-5 h-5 text-slate-500" />
+                            </button>
+                        </div>
+                        <div className="p-4">
+                            <div className="relative mb-3">
+                                <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-slate-400" />
+                                <input
+                                    className="input pl-8 pr-8"
+                                    placeholder="Buscar por referencia o nombre..."
+                                    value={articuloQuery}
+                                    onChange={e => handleArticuloInput(e.target.value)}
+                                    autoFocus
+                                />
+                                {searchingArticulo && (
+                                    <Loader2 className="absolute right-2.5 top-2.5 w-4 h-4 text-slate-400 animate-spin" />
+                                )}
+                            </div>
+                            {articuloResults.length > 0 ? (
+                                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-80 overflow-y-auto divide-y divide-slate-100">
+                                    {articuloResults.map(a => (
+                                        <button
+                                            key={a.referencia}
+                                            onClick={() => addArticuloToLineas(a)}
+                                            className="w-full text-left px-3 py-2.5 hover:bg-brand/5 transition-colors"
+                                        >
+                                            <p className="text-sm font-medium text-slate-800 leading-tight">{a.nombre}</p>
+                                            <p className="text-xs text-slate-400 font-mono mt-0.5">
+                                                {a.referencia}
+                                                <span className="ml-2 text-slate-600 font-sans">{a.precio.toLocaleString('es-ES', { minimumFractionDigits: 2 })}€</span>
+                                                <span className="ml-1 text-slate-300">IVA {a.piva}%</span>
+                                            </p>
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : articuloQuery.length >= 2 && !searchingArticulo ? (
+                                <p className="text-sm text-slate-400 text-center py-6">Sin resultados para &ldquo;{articuloQuery}&rdquo;</p>
+                            ) : (
+                                <p className="text-xs text-slate-400 text-center py-4">Escribe al menos 2 caracteres para buscar</p>
                             )}
                         </div>
                     </div>

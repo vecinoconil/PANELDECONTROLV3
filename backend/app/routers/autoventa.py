@@ -16,6 +16,7 @@ from app.auth.dependencies import get_current_user
 from app.database import get_session
 from app.models.app_models import Empresa, Usuario
 from app.services.pg_connection import get_pg_connection
+from app.schemas import normalize_permisos
 
 router = APIRouter()
 
@@ -32,8 +33,9 @@ def _get_empresa(user: Usuario, session: Session) -> Empresa:
 
 
 def _require_autoventa(user: Usuario):
-    permisos = json.loads(user.permisos or "[]")
-    if user.rol not in ("superadmin", "gerente") and "autoventa" not in permisos:
+    permisos = normalize_permisos(user.permisos or "{}")
+    can_enter = bool(permisos.get("autoventa", {}).get("entrar", False))
+    if user.rol != "superadmin" and not can_enter:
         raise HTTPException(status_code=403, detail="Sin permiso de Autoventa")
 
 
@@ -168,6 +170,153 @@ def consumo_90dias(
                 "piva": float(r["piva"]),
             })
         return rows
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error BD: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ── Buscar artículos con precio según tarifa del cliente ─────────────────
+
+@router.get("/articulos/buscar")
+def buscar_articulos(
+    q: str = Query(min_length=2),
+    cli_codigo: int = Query(...),
+    current_user: Usuario = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """
+    Searches articles by substring (referencia or nombre) and returns them
+    with the price calculated from the client's tariff and special conditions.
+    Priority: precios_clipro > tarifas_especiales_detalle (by ref > by family > global) > articulos_precios (base tariff).
+    """
+    _require_autoventa(current_user)
+    empresa = _get_empresa(current_user, session)
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+
+        # Get client tariff info
+        cur.execute(
+            "SELECT tarifabase, tarifaespecial FROM clientes WHERE codigo = %s",
+            (cli_codigo,),
+        )
+        cli = cur.fetchone()
+        if not cli:
+            raise HTTPException(status_code=404, detail="Cliente no encontrado")
+        tarifabase = int(cli["tarifabase"] or 1)
+        tarifaespecial = int(cli["tarifaespecial"] or 0)
+
+        # Search articles with base tariff price and IVA %
+        cur.execute(
+            """
+            SELECT
+                a.referencia,
+                a.nombre,
+                a.familia,
+                COALESCE(ti.iva, 21.0)::float       AS piva,
+                COALESCE(ap.precio, 0.0)::float      AS precio_base
+            FROM articulos a
+            LEFT JOIN tipos_iva ti    ON ti.codigo = a.tipoiva
+            LEFT JOIN articulos_precios ap
+                   ON ap.referencia = a.referencia AND ap.tarifa = %(tarifa)s
+            WHERE a.obsoleto = 0
+              AND (
+                  LOWER(a.referencia) LIKE LOWER(%(q)s)
+                  OR LOWER(a.nombre)  LIKE LOWER(%(q)s)
+              )
+            ORDER BY a.nombre
+            LIMIT 20
+            """,
+            {"tarifa": tarifabase, "q": f"%{q}%"},
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        if not rows:
+            return []
+
+        refs = [r["referencia"] for r in rows]
+        familias = list({r["familia"] for r in rows if r["familia"] and r["familia"] > 0})
+
+        # Special tariff conditions (if client has one)
+        esp_by_ref: dict = {}
+        esp_by_fam: dict = {}
+        esp_global = None
+        if tarifaespecial > 0:
+            cur.execute(
+                """
+                SELECT referencia, familia, descuento::float, precio::float
+                FROM tarifas_especiales_detalle
+                WHERE codigo_tarifa = %(cod)s
+                  AND (
+                    (referencia = ANY(%(refs)s) AND referencia != '')
+                    OR (familia = ANY(%(fams)s) AND referencia = '')
+                    OR (familia = 0 AND referencia = '')
+                  )
+                """,
+                {"cod": tarifaespecial, "refs": refs, "fams": familias if familias else [-1]},
+            )
+            for ec in cur.fetchall():
+                ec = dict(ec)
+                if ec["referencia"]:
+                    esp_by_ref.setdefault(ec["referencia"], ec)
+                elif ec["familia"] == 0:
+                    if esp_global is None:
+                        esp_global = ec
+                else:
+                    esp_by_fam.setdefault(ec["familia"], ec)
+
+        # Specific client prices (precios_clipro) — most recent per article
+        clipro: dict = {}
+        cur.execute(
+            """
+            SELECT DISTINCT ON (referencia) referencia, pvp::float
+            FROM precios_clipro
+            WHERE cliente = %s AND anulado = 0 AND referencia = ANY(%s)
+            ORDER BY referencia, id DESC
+            """,
+            (cli_codigo, refs),
+        )
+        for cp in cur.fetchall():
+            clipro[cp["referencia"]] = float(cp["pvp"])
+
+        # Apply price priority per article
+        def _apply_esp(esp, base):
+            if esp["precio"] > 0:
+                return float(esp["precio"])
+            if esp["descuento"] > 0:
+                return base * (1 - esp["descuento"] / 100)
+            return base
+
+        result = []
+        for r in rows:
+            ref = r["referencia"]
+            familia = r["familia"] or 0
+            base = r["precio_base"]
+
+            if ref in clipro:
+                precio = clipro[ref]
+            elif ref in esp_by_ref:
+                precio = _apply_esp(esp_by_ref[ref], base)
+            elif familia in esp_by_fam:
+                precio = _apply_esp(esp_by_fam[familia], base)
+            elif esp_global:
+                precio = _apply_esp(esp_global, base)
+            else:
+                precio = base
+
+            result.append({
+                "referencia": ref,
+                "nombre": r["nombre"],
+                "precio": round(float(precio), 6),
+                "piva": r["piva"],
+            })
+
+        return result
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error BD: {e}")
     finally:

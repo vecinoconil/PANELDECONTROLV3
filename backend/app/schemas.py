@@ -4,6 +4,46 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 
 
+class PermisoFlags(BaseModel):
+    ver: bool = True
+    entrar: bool = True
+
+
+def normalize_permisos(v) -> dict[str, dict[str, bool]]:
+    if isinstance(v, str):
+        v = json.loads(v or '{}')
+
+    if v is None:
+        return {}
+
+    # Legacy format: ["dashboard", "autoventa", ...]
+    if isinstance(v, list):
+        out: dict[str, dict[str, bool]] = {}
+        for key in v:
+            if isinstance(key, str) and key:
+                out[key] = {"ver": True, "entrar": True}
+        return out
+
+    # New format: {"dashboard": {"ver": true, "entrar": false}, ...}
+    if isinstance(v, dict):
+        out: dict[str, dict[str, bool]] = {}
+        for key, value in v.items():
+            if not isinstance(key, str) or not key:
+                continue
+            if isinstance(value, dict):
+                out[key] = {
+                    "ver": bool(value.get("ver", False)),
+                    "entrar": bool(value.get("entrar", False)),
+                }
+            else:
+                # Fallback for malformed value: treat truthy as full access.
+                flag = bool(value)
+                out[key] = {"ver": flag, "entrar": flag}
+        return out
+
+    return {}
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
@@ -37,7 +77,7 @@ class UserMe(BaseModel):
     empresa_id: Optional[int] = None
     empresa_nombre: Optional[str] = None
     locales: list[LocalInfo] = []
-    permisos: list[str] = []
+    permisos: dict[str, PermisoFlags] = {}
     agente_autoventa: Optional[int] = None
     serie_autoventa: Optional[str] = None
     autoventa_modifica_precio: bool = False
@@ -128,7 +168,12 @@ class UsuarioCreate(BaseModel):
     password: str
     rol: str
     local_ids: list[int] = []
-    permisos: list[str] = []
+    permisos: dict[str, PermisoFlags] = {}
+
+    @field_validator('permisos', mode='before')
+    @classmethod
+    def parse_permisos_create(cls, v):
+        return normalize_permisos(v)
     agente_autoventa: Optional[int] = None
     serie_autoventa: Optional[str] = None
     autoventa_modifica_precio: bool = False
@@ -143,7 +188,14 @@ class UsuarioUpdate(BaseModel):
     activo: Optional[bool] = None
     empresa_id: Optional[int] = None
     local_ids: Optional[list[int]] = None
-    permisos: Optional[list[str]] = None
+    permisos: Optional[dict[str, PermisoFlags]] = None
+
+    @field_validator('permisos', mode='before')
+    @classmethod
+    def parse_permisos_update(cls, v):
+        if v is None:
+            return None
+        return normalize_permisos(v)
     agente_autoventa: Optional[int] = None
     serie_autoventa: Optional[str] = None
     autoventa_modifica_precio: Optional[bool] = None
@@ -160,7 +212,7 @@ class UsuarioRead(BaseModel):
     plain_password: Optional[str] = None
     created_at: datetime
     local_ids: list[int] = []
-    permisos: list[str] = []
+    permisos: dict[str, PermisoFlags] = {}
     agente_autoventa: Optional[int] = None
     serie_autoventa: Optional[str] = None
     autoventa_modifica_precio: bool = False
@@ -169,9 +221,7 @@ class UsuarioRead(BaseModel):
     @field_validator('permisos', mode='before')
     @classmethod
     def parse_permisos(cls, v):
-        if isinstance(v, str):
-            return json.loads(v or '[]')
-        return v or []
+        return normalize_permisos(v)
 
     @field_validator('fpagos_autoventa', mode='before')
     @classmethod

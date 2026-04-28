@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { Users, Plus, Pencil, Trash2, Power, Eye, EyeOff, Mail } from 'lucide-react'
-import { PERMISOS_DISPONIBLES } from '../../types'
+import { PERMISOS_DISPONIBLES, type PermisosMap } from '../../types'
 
 interface Empresa { id: number; nombre: string }
 interface LocalItem { id: number; nombre: string; empresa_id: number }
@@ -18,7 +18,7 @@ interface Usuario {
     plain_password: string | null
     created_at: string
     local_ids: number[]
-    permisos: string[]
+    permisos: PermisosMap
     agente_autoventa: number | null
     serie_autoventa: string | null
     autoventa_modifica_precio: boolean
@@ -31,7 +31,7 @@ interface UsuarioForm {
     password: string
     rol: string
     local_ids: number[]
-    permisos: string[]
+    permisos: PermisosMap
     agente_autoventa: number | null
     serie_autoventa: string | null
     autoventa_modifica_precio: boolean
@@ -41,7 +41,7 @@ interface UsuarioForm {
 const ROLES = ['superadmin', 'gerente', 'encargado', 'usuario']
 const emptyForm: UsuarioForm = {
     empresa_id: null, email: '', nombre: '', password: '', rol: 'usuario',
-    local_ids: [], permisos: [],
+    local_ids: [], permisos: {},
     agente_autoventa: null, serie_autoventa: null, autoventa_modifica_precio: false, fpagos_autoventa: [],
 }
 
@@ -80,7 +80,7 @@ export default function Usuarios() {
 
     // Load agentes, series y formaspago when autoventa is selected and empresa is set
     useEffect(() => {
-        if (showModal && form.permisos.includes('autoventa') && form.empresa_id) {
+        if (showModal && (form.permisos.autoventa?.ver || form.permisos.autoventa?.entrar) && form.empresa_id) {
             setLoadingPgData(true)
             Promise.all([
                 api.get<AgenteOption[]>(`/api/admin/pg-data/agentes?empresa_id=${form.empresa_id}`),
@@ -120,16 +120,20 @@ export default function Usuarios() {
         }))
     }
 
-    const togglePermiso = (key: string) => {
+    const setPermisoFlag = (key: string, field: 'ver' | 'entrar', value: boolean) => {
         setForm(prev => ({
             ...prev,
-            permisos: prev.permisos.includes(key)
-                ? prev.permisos.filter(p => p !== key)
-                : [...prev.permisos, key]
+            permisos: {
+                ...prev.permisos,
+                [key]: {
+                    ver: field === 'ver' ? value : !!prev.permisos[key]?.ver,
+                    entrar: field === 'entrar' ? value : !!prev.permisos[key]?.entrar,
+                },
+            },
         }))
     }
 
-    const showPermisos = form.rol === 'encargado' || form.rol === 'usuario'
+    const showPermisos = form.rol === 'gerente' || form.rol === 'encargado' || form.rol === 'usuario'
 
     const togglePasswordVisible = (id: number) => {
         setVisiblePasswords(prev => {
@@ -325,17 +329,32 @@ export default function Usuarios() {
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Permisos de acceso</label>
                                     <div className="flex flex-wrap gap-2">
                                         {PERMISOS_DISPONIBLES.map(p => (
-                                            <label key={p.key} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer text-xs ${form.permisos.includes(p.key) ? 'bg-brand/10 border-brand text-brand' : 'border-slate-200 text-slate-500'}`}>
-                                                <input type="checkbox" className="sr-only" checked={form.permisos.includes(p.key)} onChange={() => togglePermiso(p.key)} />
-                                                {p.label}
-                                            </label>
+                                            <div key={p.key} className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-slate-200 text-xs">
+                                                <span className="text-slate-700 min-w-[120px]">{p.label}</span>
+                                                <label className="inline-flex items-center gap-1 text-slate-600">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={!!form.permisos[p.key]?.ver}
+                                                        onChange={e => setPermisoFlag(p.key, 'ver', e.target.checked)}
+                                                    />
+                                                    Ver
+                                                </label>
+                                                <label className="inline-flex items-center gap-1 text-slate-600">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={!!form.permisos[p.key]?.entrar}
+                                                        onChange={e => setPermisoFlag(p.key, 'entrar', e.target.checked)}
+                                                    />
+                                                    Entrar
+                                                </label>
+                                            </div>
                                         ))}
                                     </div>
                                     <p className="text-xs text-slate-400 mt-1">Superadmin y Gerente tienen acceso total automáticamente.</p>
                                 </div>
                             )}
                             {/* Autoventa config */}
-                            {(form.permisos.includes('autoventa') || form.rol === 'superadmin' || form.rol === 'gerente') && (
+                            {((form.permisos.autoventa?.ver || form.permisos.autoventa?.entrar) || form.rol === 'superadmin' || form.rol === 'gerente') && (
                                 <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-3">
                                     <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Configuración Autoventa</p>
                                     {!form.empresa_id ? (
