@@ -5,6 +5,7 @@ import { UserMe } from '../../types'
 import {
     ShoppingCart, FileText, Truck, Search, Calculator,
     X, Check, Loader2, AlertCircle, CreditCard, ChevronDown, ChevronUp, Plus,
+    Image, List, Package,
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -32,12 +33,16 @@ interface ProductoConsumo {
     ultimo_precio: number
     ultima_fecha: string
     piva: number
+    control_lotes?: boolean
+    tiene_imagen?: boolean
 }
 interface ArticuloBusqueda {
     referencia: string
     nombre: string
     precio: number
     piva: number
+    control_lotes?: boolean
+    tiene_imagen?: boolean
 }
 interface LineaDoc {
     referencia: string
@@ -46,6 +51,22 @@ interface LineaDoc {
     precio: number
     piva: number
     precioEditado: boolean
+    control_lotes?: boolean
+    tiene_imagen?: boolean
+}
+interface Lote {
+    id: number
+    lote: string
+    fecha_compra: string | null
+    fecha_caducidad: string | null
+    stock: number
+}
+interface AsignacionLote {
+    id: number
+    lote: string
+    fecha_caducidad: string | null
+    stock: number
+    asignar: number
 }
 interface Vencimiento {
     id: number
@@ -73,6 +94,152 @@ const TIPOS: { id: TipoDoc; label: string; icon: React.ElementType; color: strin
     { id: 4, label: 'Albarán',  icon: Truck,        color: 'bg-amber-50 border-amber-300 text-amber-700' },
     { id: 8, label: 'Factura',  icon: FileText,     color: 'bg-green-50 border-green-300 text-green-700' },
 ]
+
+// ── Lot Assignment Modal ──────────────────────────────────────────────────
+
+function distribuirLotesFEFO(lotes: Lote[], total: number): AsignacionLote[] {
+    let remaining = total
+    return lotes.map(l => {
+        const asignar = Math.min(Math.floor(l.stock), Math.max(0, remaining))
+        remaining -= asignar
+        return { id: l.id, lote: l.lote, fecha_caducidad: l.fecha_caducidad, stock: l.stock, asignar }
+    })
+}
+
+function LoteModal({
+    nombre,
+    referencia,
+    lotes,
+    onConfirm,
+    onClose,
+}: {
+    nombre: string
+    referencia: string
+    lotes: Lote[]
+    onConfirm: (asignaciones: AsignacionLote[]) => void
+    onClose: () => void
+}) {
+    const [cantidad, setCantidad] = useState('1')
+    const [asignaciones, setAsignaciones] = useState<AsignacionLote[]>(() =>
+        distribuirLotesFEFO(lotes, 1)
+    )
+
+    const totalAsignado = asignaciones.reduce((s, a) => s + a.asignar, 0)
+    const totalRequerido = parseInt(cantidad) || 0
+    const stockTotal = lotes.reduce((s, l) => s + l.stock, 0)
+
+    const handleCantidadChange = (val: string) => {
+        setCantidad(val)
+        const n = parseInt(val) || 0
+        setAsignaciones(distribuirLotesFEFO(lotes, n))
+    }
+
+    const updateAsignacion = (idx: number, val: string) => {
+        const n = Math.max(0, parseInt(val) || 0)
+        setAsignaciones(prev => prev.map((a, i) => i === idx ? { ...a, asignar: n } : a))
+    }
+
+    const fmtDate = (d: string | null) => d
+        ? new Date(d).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit' })
+        : '—'
+
+    return (
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center px-3"
+             onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[90vh] flex flex-col"
+                 onClick={e => e.stopPropagation()}>
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+                    <div className="flex items-center gap-2">
+                        <Package className="w-4 h-4 text-amber-600" />
+                        <div>
+                            <p className="text-sm font-bold text-slate-800 leading-tight">{nombre}</p>
+                            <p className="text-[10px] text-slate-400 font-mono">{referencia}</p>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="p-1 rounded hover:bg-slate-100">
+                        <X className="w-4 h-4 text-slate-500" />
+                    </button>
+                </div>
+
+                {/* Cantidad total */}
+                <div className="px-4 py-3 border-b border-slate-100">
+                    <label className="text-xs font-semibold text-slate-600 block mb-1">Unidades totales</label>
+                    <input
+                        type="number"
+                        min="1"
+                        max={stockTotal}
+                        className="input text-center text-lg font-bold w-full"
+                        value={cantidad}
+                        onChange={e => handleCantidadChange(e.target.value)}
+                    />
+                    <p className="text-[10px] text-slate-400 text-center mt-1">
+                        Stock disponible: {stockTotal} uds
+                    </p>
+                </div>
+
+                {/* Lotes */}
+                <div className="overflow-y-auto flex-1 divide-y divide-slate-100">
+                    {lotes.length === 0 ? (
+                        <p className="text-sm text-slate-400 text-center py-6">Sin lotes con stock</p>
+                    ) : asignaciones.map((a, idx) => (
+                        <div key={a.id} className="px-4 py-2.5">
+                            <div className="flex items-center justify-between mb-1.5">
+                                <div>
+                                    <span className="text-sm font-semibold text-slate-800 font-mono">{a.lote}</span>
+                                    {a.fecha_caducidad && (
+                                        <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                                            new Date(a.fecha_caducidad) < new Date()
+                                                ? 'bg-red-100 text-red-700'
+                                                : 'bg-amber-50 text-amber-700'
+                                        }`}>
+                                            Cad. {fmtDate(a.fecha_caducidad)}
+                                        </span>
+                                    )}
+                                </div>
+                                <span className="text-xs text-slate-400">Stock: {a.stock}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <label className="text-xs text-slate-500 w-16">Asignar:</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max={a.stock}
+                                    className="input text-right text-sm flex-1"
+                                    value={a.asignar}
+                                    onChange={e => updateAsignacion(idx, e.target.value)}
+                                />
+                                <span className="text-xs text-slate-400">/ {a.stock}</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Footer */}
+                <div className="px-4 py-3 border-t border-slate-200 space-y-2">
+                    <div className="flex justify-between text-sm">
+                        <span className="text-slate-500">Total asignado:</span>
+                        <span className={`font-bold ${totalAsignado !== totalRequerido ? 'text-red-600' : 'text-green-600'}`}>
+                            {totalAsignado} / {totalRequerido} uds
+                        </span>
+                    </div>
+                    {totalAsignado !== totalRequerido && (
+                        <p className="text-xs text-red-500 text-center">
+                            {totalAsignado < totalRequerido ? 'Stock insuficiente para cubrir la demanda' : 'Has asignado más unidades de las solicitadas'}
+                        </p>
+                    )}
+                    <button
+                        onClick={() => onConfirm(asignaciones.filter(a => a.asignar > 0))}
+                        disabled={totalAsignado === 0}
+                        className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-40"
+                    >
+                        <Check className="w-4 h-4" /> Confirmar lotes
+                    </button>
+                </div>
+            </div>
+        </div>
+    )
+}
 
 // ── Calculator Modal ───────────────────────────────────────────────────────
 
@@ -154,8 +321,9 @@ export default function Autoventa() {
     const [lineas, setLineas] = useState<LineaDoc[]>([])
     const [loadingProductos, setLoadingProductos] = useState(false)
 
-    // Calculator modal
+    // Calculator modals
     const [calcIdx, setCalcIdx] = useState<number | null>(null)
+    const [calcPrecioIdx, setCalcPrecioIdx] = useState<number | null>(null)
 
     // Documentos cliente modal
     const [showDocsModal, setShowDocsModal] = useState(false)
@@ -196,6 +364,15 @@ export default function Autoventa() {
     const [articuloResults, setArticuloResults] = useState<ArticuloBusqueda[]>([])
     const [searchingArticulo, setSearchingArticulo] = useState(false)
     const articuloSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    // Vista imágenes / líneas
+    const [vistaImagenes, setVistaImagenes] = useState(false)
+
+    // Lote modal
+    const [loteModal, setLoteModal] = useState<{
+        articulo: ArticuloBusqueda
+        lotes: Lote[]
+    } | null>(null)
 
     // Submit
     const [submitting, setSubmitting] = useState(false)
@@ -238,11 +415,12 @@ export default function Autoventa() {
         if (searchTimer.current) clearTimeout(searchTimer.current)
         if (q.length < 2) { setClienteResults([]); return }
 
-        // Instant filter from cache
-        const q_low = q.toLowerCase()
-        const cached = clientesCache.filter(c =>
-            c.nombre.toLowerCase().includes(q_low) || c.alias?.toLowerCase().includes(q_low)
-        ).slice(0, 30)
+        // Instant filter from cache — multi-word, case-insensitive
+        const words = q.toLowerCase().trim().split(/\s+/).filter(Boolean)
+        const cached = clientesCache.filter(c => {
+            const haystack = (c.nombre + ' ' + (c.alias || '')).toLowerCase()
+            return words.every(w => haystack.includes(w))
+        }).slice(0, 30)
         if (cached.length > 0) {
             setClienteResults(cached)
         }
@@ -278,6 +456,8 @@ export default function Autoventa() {
                 precio: p.ultimo_precio,
                 piva: p.piva,
                 precioEditado: false,
+                control_lotes: p.control_lotes,
+                tiene_imagen: p.tiene_imagen,
             })))
         } catch { setLineas([]) }
         finally { setLoadingProductos(false) }
@@ -285,6 +465,18 @@ export default function Autoventa() {
 
     const updateUnidades = (idx: number, val: string) => {
         setLineas(prev => prev.map((l, i) => i === idx ? { ...l, unidades: val } : l))
+    }
+
+    const abrirLotesParaLinea = async (idx: number) => {
+        const linea = lineas[idx]
+        if (!linea) return
+        try {
+            const r = await api.get<Lote[]>(`/api/autoventa/articulos/${encodeURIComponent(linea.referencia)}/lotes`)
+            setLoteModal({
+                articulo: { referencia: linea.referencia, nombre: linea.descripcion, precio: linea.precio, piva: linea.piva, control_lotes: true, tiene_imagen: linea.tiene_imagen },
+                lotes: r.data,
+            })
+        } catch { /* ignore */ }
     }
 
     const updatePrecio = (idx: number, val: string) => {
@@ -391,21 +583,57 @@ export default function Autoventa() {
         }, 300)
     }
 
-    const addArticuloToLineas = (a: ArticuloBusqueda) => {
+    const addArticuloToLineas = async (a: ArticuloBusqueda) => {
+        setShowAddArticuloModal(false)
+        setArticuloQuery('')
+        setArticuloResults([])
+
+        // For albarán/factura with lot control, open lot modal
+        if (a.control_lotes && (tipodoc === 4 || tipodoc === 8)) {
+            try {
+                const r = await api.get<Lote[]>(`/api/autoventa/articulos/${encodeURIComponent(a.referencia)}/lotes`)
+                setLoteModal({ articulo: a, lotes: r.data })
+            } catch {
+                // fallback: add without lot control
+                _addLineaSinLote(a, '1')
+            }
+            return
+        }
+        _addLineaSinLote(a, '1')
+    }
+
+    const _addLineaSinLote = (a: ArticuloBusqueda, uds: string) => {
         const existing = lineas.findIndex(l => l.referencia === a.referencia)
         if (existing < 0) {
             setLineas(prev => [...prev, {
                 referencia: a.referencia,
                 descripcion: a.nombre,
-                unidades: '1',
+                unidades: uds,
                 precio: a.precio,
                 piva: a.piva,
                 precioEditado: false,
+                control_lotes: a.control_lotes,
+                tiene_imagen: a.tiene_imagen,
             }])
         }
-        setShowAddArticuloModal(false)
-        setArticuloQuery('')
-        setArticuloResults([])
+    }
+
+    const handleConfirmarLotes = (asignaciones: AsignacionLote[]) => {
+        if (!loteModal) return
+        const { articulo } = loteModal
+        // Create one linea per lot assignment
+        const nuevas = asignaciones.filter(a => a.asignar > 0).map(a => ({
+            referencia: articulo.referencia,
+            descripcion: `${articulo.nombre} [L:${a.lote}]`,
+            unidades: String(a.asignar),
+            precio: articulo.precio,
+            piva: articulo.piva,
+            precioEditado: false,
+            control_lotes: true,
+            tiene_imagen: articulo.tiene_imagen,
+        }))
+        setLineas(prev => [...prev, ...nuevas])
+        setLoteModal(null)
     }
 
     const handleSubmit = async () => {
@@ -629,7 +857,8 @@ export default function Autoventa() {
     }
 
     return (
-        <div className="p-4 max-w-2xl mx-auto space-y-4">
+        <div className="p-4 w-full" style={{ maxWidth: '75%', margin: '0 auto' }}>
+        <div className="space-y-4">
             <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <ShoppingCart className="w-5 h-5 text-brand" />
                 <h1 className="text-xl font-bold">Autoventa</h1>
@@ -744,14 +973,25 @@ export default function Autoventa() {
                                 <span className="ml-2 text-xs font-normal text-slate-400">{lineas.length} artículos</span>
                             )}
                         </span>
-                        {clienteSeleccionado && !loadingProductos && (
+                        <span className="flex items-center gap-1.5">
+                            {/* Toggle vista */}
                             <button
-                                onClick={() => { setShowAddArticuloModal(true); setArticuloQuery(''); setArticuloResults([]) }}
-                                className="flex items-center gap-1 text-xs font-medium text-brand bg-brand/10 border border-brand/30 px-2.5 py-1 rounded-lg hover:bg-brand/20 transition-colors"
+                                onClick={() => setVistaImagenes(v => !v)}
+                                title={vistaImagenes ? 'Vista líneas' : 'Vista imágenes'}
+                                className="flex items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg hover:bg-slate-200 transition-colors"
                             >
-                                <Plus className="w-3.5 h-3.5" /> Añadir
+                                {vistaImagenes ? <List className="w-3.5 h-3.5" /> : <Image className="w-3.5 h-3.5" />}
+                                {vistaImagenes ? 'Vista Líneas' : 'Vista Imágenes'}
                             </button>
-                        )}
+                            {clienteSeleccionado && !loadingProductos && (
+                                <button
+                                    onClick={() => { setShowAddArticuloModal(true); setArticuloQuery(''); setArticuloResults([]) }}
+                                    className="flex items-center gap-1 text-xs font-medium text-brand bg-brand/10 border border-brand/30 px-2.5 py-1 rounded-lg hover:bg-brand/20 transition-colors"
+                                >
+                                    <Plus className="w-3.5 h-3.5" /> Añadir
+                                </button>
+                            )}
+                        </span>
                     </p>
 
                     {loadingProductos ? (
@@ -771,58 +1011,158 @@ export default function Autoventa() {
                                 <Plus className="w-4 h-4" /> Añadir artículo
                             </button>
                         </div>
-                    ) : (
-                        <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+                    ) : vistaImagenes ? (
+                        /* ── Vista Imágenes ── */
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                             {lineas.map((l, idx) => {
                                 const uds = parseFloat(l.unidades)
                                 const tieneUds = !isNaN(uds) && uds > 0
                                 const importe = tieneUds ? uds * l.precio * (1 + l.piva / 100) : null
+                                const necesitaLotes = l.control_lotes && (tipodoc === 4 || tipodoc === 8)
                                 return (
                                     <div
                                         key={l.referencia + idx}
-                                        className={`flex items-center gap-2 px-3 py-2 transition-colors ${tieneUds ? 'bg-brand/5' : 'bg-white'}`}
+                                        className={`rounded-xl border overflow-hidden flex flex-col transition-all ${tieneUds ? 'border-brand shadow-sm' : 'border-slate-200'}`}
                                     >
+                                        {/* Imagen */}
+                                        {l.tiene_imagen ? (
+                                            <div className="bg-slate-50 flex items-center justify-center overflow-hidden" style={{ height: 90 }}>
+                                                <img
+                                                    src={`/api/autoventa/articulos/${encodeURIComponent(l.referencia)}/imagen`}
+                                                    alt={l.descripcion}
+                                                    className="object-contain w-full h-full"
+                                                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                                                />
+                                            </div>
+                                        ) : (
+                                            <div className="bg-slate-100 flex items-center justify-center" style={{ height: 90 }}>
+                                                <Package className="w-8 h-8 text-slate-300" />
+                                            </div>
+                                        )}
+                                        {/* Info */}
+                                        <div className="p-2 flex-1 flex flex-col">
+                                            <p className="text-[11px] font-semibold text-slate-800 leading-tight line-clamp-2 flex-1">{l.descripcion}</p>
+                                            <div className="flex items-center justify-between mt-1">
+                                                <span className="text-[10px] text-slate-400 font-mono">{l.precio.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</span>
+                                                {necesitaLotes && <Package className="w-3 h-3 text-amber-500" />}
+                                            </div>
+                                            {importe !== null && (
+                                                <p className="text-xs font-bold text-brand mt-0.5">
+                                                    Total: {importe.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                                                </p>
+                                            )}
+                                        </div>
+                                        {/* Controles */}
+                                        <div className="px-2 pb-2 flex items-center gap-1">
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                step="1"
+                                                className={`flex-1 text-sm text-right border rounded-lg py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-brand ${tieneUds ? 'border-brand' : 'border-slate-200'}`}
+                                                placeholder="Uds"
+                                                value={l.unidades === '0' ? '' : l.unidades}
+                                                onChange={e => updateUnidades(idx, e.target.value)}
+                                                onKeyDown={async e => { if (e.key === 'Enter' && necesitaLotes) { e.preventDefault(); await abrirLotesParaLinea(idx) } }}
+                                            />
+                                            <button onClick={async () => { if (necesitaLotes) { await abrirLotesParaLinea(idx) } else { setCalcIdx(idx) } }} className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500">
+                                                <Calculator className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button onClick={() => setLineas(prev => prev.filter((_, i) => i !== idx))} className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-500">
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    ) : (
+                        /* ── Vista Líneas ── */
+                        <div className="border border-slate-200 rounded-xl overflow-hidden">
+                            {/* Header */}
+                            <div className="grid bg-slate-50 border-b border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500" style={{ gridTemplateColumns: 'auto 1fr auto auto auto' }}>
+                                <span className="w-24 text-center">Unidades</span>
+                                <span className="px-2">Descripción</span>
+                                <span className="w-32 text-right">P. Unitario</span>
+                                <span className="w-24 text-right">Total</span>
+                                <span className="w-8"></span>
+                            </div>
+                            {lineas.map((l, idx) => {
+                                const uds = parseFloat(l.unidades)
+                                const tieneUds = !isNaN(uds) && uds > 0
+                                const importe = tieneUds ? uds * l.precio * (1 + l.piva / 100) : null
+                                const necesitaLotes = l.control_lotes && (tipodoc === 4 || tipodoc === 8)
+                                return (
+                                    <div
+                                        key={l.referencia + idx}
+                                        className={`grid items-center px-3 py-1.5 border-b border-slate-100 last:border-0 transition-colors ${tieneUds ? 'bg-brand/5' : 'bg-white'}`}
+                                        style={{ gridTemplateColumns: 'auto 1fr auto auto auto' }}
+                                    >
+                                        {/* Unidades + calc / Lotes */}
+                                        <div className="flex items-center gap-1 w-24">
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                step="1"
+                                                className={`w-14 text-sm text-right border rounded-lg py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-brand ${tieneUds ? 'border-brand bg-white' : 'border-slate-200 bg-white'}`}
+                                                placeholder="Uds"
+                                                value={l.unidades === '0' ? '' : l.unidades}
+                                                onChange={e => updateUnidades(idx, e.target.value)}
+                                                onKeyDown={async e => { if (e.key === 'Enter' && necesitaLotes) { e.preventDefault(); await abrirLotesParaLinea(idx) } }}
+                                            />
+                                            <button
+                                                title="Calculadora unidades"
+                                                onClick={async () => { if (necesitaLotes) { await abrirLotesParaLinea(idx) } else { setCalcIdx(idx) } }}
+                                                className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 flex-shrink-0"
+                                            >
+                                                <Calculator className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
                                         {/* Descripción */}
-                                        <div className="flex-1 min-w-0">
+                                        <div className="px-2 min-w-0">
                                             <p className="text-xs font-medium text-slate-800 leading-tight truncate">{l.descripcion}</p>
-                                            <p className="text-xs text-slate-400 font-mono leading-tight">
-                                                {canEditPrice ? (
+                                            <p className="text-[10px] text-slate-400 font-mono">{l.referencia} · IVA {l.piva}%</p>
+                                        </div>
+                                        {/* Precio unitario + calc */}
+                                        <div className="flex items-center gap-1 w-32 justify-end">
+                                            {canEditPrice ? (
+                                                <>
                                                     <input
                                                         type="number"
                                                         step="0.01"
-                                                        className="w-16 text-xs text-slate-500 bg-transparent border-b border-slate-300 focus:outline-none focus:border-brand text-right"
+                                                        className="w-20 text-sm text-right border border-slate-300 rounded-lg py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-brand bg-white"
                                                         value={l.precio}
                                                         onChange={e => updatePrecio(idx, e.target.value)}
                                                     />
-                                                ) : (
-                                                    <span>{l.precio.toLocaleString('es-ES', { minimumFractionDigits: 2 })}€</span>
-                                                )}
-                                                <span className="ml-1 text-slate-300">IVA {l.piva}%</span>
-                                            </p>
+                                                    <button
+                                                        title="Calculadora precio"
+                                                        onClick={() => setCalcPrecioIdx(idx)}
+                                                        className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 flex-shrink-0"
+                                                    >
+                                                        <Calculator className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <span className="text-sm text-slate-700 font-mono">{l.precio.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</span>
+                                            )}
                                         </div>
-                                        {/* Importe */}
-                                        {importe !== null && (
-                                            <span className="text-xs font-semibold text-brand whitespace-nowrap w-16 text-right">
-                                                {importe.toLocaleString('es-ES', { minimumFractionDigits: 2 })}€
-                                            </span>
-                                        )}
-                                        {/* Cantidad */}
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            step="1"
-                                            className={`w-14 text-sm text-right border rounded-lg py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-brand ${tieneUds ? 'border-brand bg-white' : 'border-slate-200 bg-white'}`}
-                                            placeholder="Uds"
-                                            value={l.unidades === '0' ? '' : l.unidades}
-                                            onChange={e => updateUnidades(idx, e.target.value)}
-                                        />
-                                        <button
-                                            title="Calculadora"
-                                            onClick={() => setCalcIdx(idx)}
-                                            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex-shrink-0"
-                                        >
-                                            <Calculator className="w-4 h-4" />
-                                        </button>
+                                        {/* Total */}
+                                        <div className="w-24 text-right">
+                                            {importe !== null ? (
+                                                <span className="text-sm font-semibold text-brand">{importe.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</span>
+                                            ) : (
+                                                <span className="text-xs text-slate-300">—</span>
+                                            )}
+                                        </div>
+                                        {/* Eliminar */}
+                                        <div className="w-8 flex justify-center">
+                                            <button
+                                                title="Eliminar línea"
+                                                onClick={() => setLineas(prev => prev.filter((_, i) => i !== idx))}
+                                                className="p-1 rounded hover:bg-red-50 text-slate-300 hover:text-red-500"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
                                     </div>
                                 )
                             })}
@@ -869,8 +1209,33 @@ export default function Autoventa() {
             {calcIdx !== null && (
                 <CalculatorModal
                     initial={lineas[calcIdx]?.unidades ?? '0'}
-                    onConfirm={val => updateUnidades(calcIdx, val)}
+                    onConfirm={async val => {
+                        updateUnidades(calcIdx, val)
+                        setCalcIdx(null)
+                        const linea = lineas[calcIdx]
+                        if (linea?.control_lotes && (tipodoc === 4 || tipodoc === 8)) {
+                            await abrirLotesParaLinea(calcIdx)
+                        }
+                    }}
                     onClose={() => setCalcIdx(null)}
+                />
+            )}
+            {calcPrecioIdx !== null && (
+                <CalculatorModal
+                    initial={String(lineas[calcPrecioIdx]?.precio ?? '0')}
+                    onConfirm={val => updatePrecio(calcPrecioIdx, val)}
+                    onClose={() => setCalcPrecioIdx(null)}
+                />
+            )}
+
+            {/* Lote modal */}
+            {loteModal && (
+                <LoteModal
+                    nombre={loteModal.articulo.nombre}
+                    referencia={loteModal.articulo.referencia}
+                    lotes={loteModal.lotes}
+                    onConfirm={handleConfirmarLotes}
+                    onClose={() => setLoteModal(null)}
                 />
             )}
 
@@ -1159,22 +1524,59 @@ export default function Autoventa() {
                                 )}
                             </div>
                             {articuloResults.length > 0 ? (
-                                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-80 overflow-y-auto divide-y divide-slate-100">
-                                    {articuloResults.map(a => (
-                                        <button
-                                            key={a.referencia}
-                                            onClick={() => addArticuloToLineas(a)}
-                                            className="w-full text-left px-3 py-2.5 hover:bg-brand/5 transition-colors"
-                                        >
-                                            <p className="text-sm font-medium text-slate-800 leading-tight">{a.nombre}</p>
-                                            <p className="text-xs text-slate-400 font-mono mt-0.5">
-                                                {a.referencia}
-                                                <span className="ml-2 text-slate-600 font-sans">{a.precio.toLocaleString('es-ES', { minimumFractionDigits: 2 })}€</span>
-                                                <span className="ml-1 text-slate-300">IVA {a.piva}%</span>
-                                            </p>
-                                        </button>
-                                    ))}
-                                </div>
+                                vistaImagenes ? (
+                                    <div className="grid grid-cols-2 gap-2 max-h-80 overflow-y-auto">
+                                        {articuloResults.map(a => (
+                                            <button
+                                                key={a.referencia}
+                                                onClick={() => addArticuloToLineas(a)}
+                                                className="text-left rounded-xl border border-slate-200 overflow-hidden hover:border-brand transition-colors flex flex-col"
+                                            >
+                                                {a.tiene_imagen ? (
+                                                    <div className="bg-slate-50 flex items-center justify-center overflow-hidden" style={{ height: 70 }}>
+                                                        <img
+                                                            src={`/api/autoventa/articulos/${encodeURIComponent(a.referencia)}/imagen`}
+                                                            alt={a.nombre}
+                                                            className="object-contain w-full h-full"
+                                                            onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <div className="bg-slate-100 flex items-center justify-center" style={{ height: 70 }}>
+                                                        <Package className="w-6 h-6 text-slate-300" />
+                                                    </div>
+                                                )}
+                                                <div className="p-1.5">
+                                                    <p className="text-[11px] font-semibold text-slate-800 leading-tight line-clamp-2">{a.nombre}</p>
+                                                    <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                                        {a.precio.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                                                        {a.control_lotes && <Package className="inline w-2.5 h-2.5 ml-1 text-amber-500" />}
+                                                    </p>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="border border-slate-200 rounded-xl overflow-hidden max-h-80 overflow-y-auto divide-y divide-slate-100">
+                                        {articuloResults.map(a => (
+                                            <button
+                                                key={a.referencia}
+                                                onClick={() => addArticuloToLineas(a)}
+                                                className="w-full text-left px-3 py-2.5 hover:bg-brand/5 transition-colors"
+                                            >
+                                                <p className="text-sm font-medium text-slate-800 leading-tight flex items-center gap-1.5">
+                                                    {a.nombre}
+                                                    {a.control_lotes && <Package className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+                                                </p>
+                                                <p className="text-xs text-slate-400 font-mono mt-0.5">
+                                                    {a.referencia}
+                                                    <span className="ml-2 text-slate-600 font-sans">{a.precio.toLocaleString('es-ES', { minimumFractionDigits: 2 })}€</span>
+                                                    <span className="ml-1 text-slate-300">IVA {a.piva}%</span>
+                                                </p>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )
                             ) : articuloQuery.length >= 2 && !searchingArticulo ? (
                                 <p className="text-sm text-slate-400 text-center py-6">Sin resultados para &ldquo;{articuloQuery}&rdquo;</p>
                             ) : (
@@ -1184,6 +1586,7 @@ export default function Autoventa() {
                     </div>
                 </div>
             )}
+        </div>
         </div>
     )
 }

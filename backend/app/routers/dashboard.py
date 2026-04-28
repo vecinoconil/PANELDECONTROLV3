@@ -222,14 +222,14 @@ def cuadro_mandos(
         """, params)
         pte_cobro = float(cur.fetchone()["total_pte"])
 
-        # tipo=1: compra (proveedores → pte pago)
-        cur.execute(f"""
+        # tipo=1: compra (proveedores → pte pago) — siempre año completo
+        cur.execute("""
             SELECT COALESCE(SUM(v.importe), 0) AS total_pte
             FROM vencimientos v
             JOIN compras_cabeceras cc ON v.idcab = cc.id
             WHERE v.tipo = 1 AND v.situacion = 0
-              AND cc.fecha >= %(fecha_desde)s AND cc.fecha < %(fecha_hasta)s
-        """, params)
+              AND cc.fecha >= %(anio_desde)s AND cc.fecha < %(anio_hasta)s
+        """, {**params, "anio_desde": f"{anio}-01-01", "anio_hasta": f"{anio + 1}-01-01"})
         pte_pago = float(cur.fetchone()["total_pte"])
 
         vencimientos = {"clientes": pte_cobro, "proveedores": pte_pago}
@@ -380,6 +380,107 @@ def cuadro_mandos(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error consultando BD: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get("/cobros-resumen")
+def cobros_resumen(
+    series: Optional[list[str]] = Query(default=None),
+    agente: Optional[int] = Query(default=None),
+    current_user: Usuario = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Cobros de Hoy / Semana / Mes desglosados por Caja y Banco."""
+    empresa = _get_empresa(current_user, session)
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+
+        serie_join = ""
+        serie_cond = ""
+        agente_cond = ""
+        params: dict = {}
+        if series and len(series) > 0:
+            serie_join = "JOIN ventas_cabeceras vc ON v.idcab = vc.id"
+            serie_cond = " AND vc.serie = ANY(%(series)s)"
+            params["series"] = series
+        if agente is not None:
+            if not serie_join:
+                serie_join = "JOIN ventas_cabeceras vc ON v.idcab = vc.id"
+            agente_cond = " AND vc.agente = %(agente)s"
+            params["agente"] = agente
+
+        def _query_periodo(fecha_desde: str, fecha_hasta: str) -> dict:
+            p = {**params, "fd": fecha_desde, "fh": fecha_hasta}
+            # Totales por caja/banco
+            cur.execute(f"""
+                SELECT v.cajabanco,
+                       COALESCE(SUM(v.importe), 0) AS total,
+                       COUNT(*) AS num
+                FROM vencimientos v
+                {serie_join}
+                WHERE v.tipo = 0 AND v.situacion <> 0
+                  AND v.fechacobro >= %(fd)s AND v.fechacobro <= %(fh)s
+                  {serie_cond} {agente_cond}
+                GROUP BY v.cajabanco
+            """, p)
+            rows = cur.fetchall()
+            caja = 0.0
+            banco = 0.0
+            total = 0.0
+            for r in rows:
+                val = float(r["importe"] if "importe" in r else 0)
+                val = float(r["total"])
+                if r["cajabanco"] == 0:
+                    caja = val
+                else:
+                    banco += val
+                total += val
+
+            # Detalle (para modal)
+            cur.execute(f"""
+                SELECT v.cajabanco, v.tipocobro, v.importe, v.fechacobro::text AS fechacobro,
+                       COALESCE(vc2.cli_nombre, '') AS cli_nombre,
+                       vc2.serie, vc2.numero
+                FROM vencimientos v
+                JOIN ventas_cabeceras vc2 ON v.idcab = vc2.id
+                {"" if not serie_cond else ""}
+                WHERE v.tipo = 0 AND v.situacion <> 0
+                  AND v.fechacobro >= %(fd)s AND v.fechacobro <= %(fh)s
+                  {serie_cond} {agente_cond}
+                ORDER BY v.fechacobro DESC, v.cajabanco
+            """, p)
+            detalle = []
+            for r in cur.fetchall():
+                detalle.append({
+                    "cajabanco": r["cajabanco"],
+                    "tipocobro": r["tipocobro"],
+                    "importe": float(r["importe"]),
+                    "fechacobro": r["fechacobro"],
+                    "cli_nombre": r["cli_nombre"],
+                    "serie": r["serie"] or "",
+                    "numero": int(r["numero"]) if r["numero"] else 0,
+                })
+            return {"total": total, "caja": caja, "banco": banco, "detalle": detalle}
+
+        from datetime import date, timedelta
+        hoy = date.today()
+        # Lunes de la semana actual
+        lunes = hoy - timedelta(days=hoy.weekday())
+        primer_dia_mes = hoy.replace(day=1)
+
+        resultado = {
+            "hoy": _query_periodo(str(hoy), str(hoy)),
+            "semana": _query_periodo(str(lunes), str(hoy)),
+            "mes": _query_periodo(str(primer_dia_mes), str(hoy)),
+        }
+        cur.close()
+        return resultado
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error cobros-resumen: {str(e)}")
     finally:
         if conn:
             conn.close()
@@ -666,9 +767,11 @@ def facturas_proveedor(
 @router.get("/vencimientos-detalle")
 def vencimientos_detalle(
     tipo: int = Query(..., description="0=clientes, 1=proveedores"),
+    anio: Optional[int] = Query(default=None),
     fecha_desde: Optional[str] = Query(default=None),
     fecha_hasta: Optional[str] = Query(default=None),
     series: Optional[list[str]] = Query(default=None),
+    solo_pendientes: bool = Query(default=True),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
@@ -679,40 +782,57 @@ def vencimientos_detalle(
         conn = get_pg_connection(empresa)
         cur = conn.cursor()
 
-        fecha_cond = ""
-        params: dict = {"tipo": tipo}
-        if fecha_desde:
-            fecha_cond += " AND v.fecha >= %(vto_desde)s"
+        anio_cond_vc = ""
+        anio_cond_cc = ""
+        serie_cond_vc = ""
+        params: dict = {}
+        if anio is not None:
+            anio_cond_vc = " AND vc.fecha >= %(cab_desde)s AND vc.fecha < %(cab_hasta)s"
+            anio_cond_cc = " AND cc.fecha >= %(cab_desde)s AND cc.fecha < %(cab_hasta)s"
+            params["cab_desde"] = f"{anio}-01-01"
+            params["cab_hasta"] = f"{anio + 1}-01-01"
+        elif fecha_desde:
+            anio_cond_vc = " AND vc.fecha >= %(vto_desde)s"
+            anio_cond_cc = " AND cc.fecha >= %(vto_desde)s"
             params["vto_desde"] = fecha_desde
-        if fecha_hasta:
-            fecha_cond += " AND v.fecha <= %(vto_hasta)s"
+        if fecha_hasta and anio is None:
+            anio_cond_vc += " AND vc.fecha <= %(vto_hasta)s"
+            anio_cond_cc += " AND cc.fecha <= %(vto_hasta)s"
             params["vto_hasta"] = fecha_hasta
+        if series and len(series) > 0:
+            serie_cond_vc = " AND vc.serie = ANY(%(series)s)"
+            params["series"] = series
 
         if tipo == 0:
-            join = "JOIN ventas_cabeceras cab ON v.idcab = cab.id"
-            nombre_col = "cab.cli_nombre AS nombre"
-            serie_cond = ""
-            if series and len(series) > 0:
-                serie_cond = " AND cab.serie = ANY(%(series)s)"
-                params["series"] = series
+            cur.execute(f"""
+                SELECT vc.id, vc.cli_codigo AS codigo, vc.cli_nombre AS nombre,
+                       vc.serie, vc.numero, vc.fecha::text AS fecha,
+                       COALESCE(vc.total, 0) AS total_fra,
+                       COALESCE((
+                           SELECT SUM(v2.importe) FROM vencimientos v2
+                           WHERE v2.idcab = vc.id AND v2.tipo = 0 AND v2.situacion = 0
+                       ), 0) AS pendiente
+                FROM ventas_cabeceras vc
+                WHERE vc.tipodoc = 8
+                  {serie_cond_vc} {anio_cond_vc}
+                {"AND COALESCE((SELECT SUM(v2.importe) FROM vencimientos v2 WHERE v2.idcab = vc.id AND v2.tipo=0 AND v2.situacion=0),0) > 0" if solo_pendientes else ""}
+                ORDER BY vc.fecha DESC, vc.cli_nombre
+            """, params)
         else:
-            join = "JOIN compras_cabeceras cab ON v.idcab = cab.id"
-            nombre_col = "cab.pro_nombre AS nombre"
-            serie_cond = ""
-            if series and len(series) > 0:
-                serie_cond = " AND cab.serie = ANY(%(series)s)"
-                params["series"] = series
-
-        cur.execute(f"""
-            SELECT v.clipro AS codigo, {nombre_col},
-                   cab.serie, cab.numero, v.fecha,
-                   v.importe
-            FROM vencimientos v
-            {join}
-            WHERE v.tipo = %(tipo)s AND v.situacion = 0
-              {serie_cond} {fecha_cond}
-            ORDER BY v.fecha, v.clipro
-        """, params)
+            cur.execute(f"""
+                SELECT cc.id, cc.pro_codigo AS codigo, cc.pro_nombre AS nombre,
+                       cc.serie, cc.numero, cc.fecha::text AS fecha,
+                       COALESCE(cc.total, 0) AS total_fra,
+                       COALESCE((
+                           SELECT SUM(v2.importe) FROM vencimientos v2
+                           WHERE v2.idcab = cc.id AND v2.tipo = 1 AND v2.situacion = 0
+                       ), 0) AS pendiente
+                FROM compras_cabeceras cc
+                WHERE cc.tipodoc = 8
+                  {anio_cond_cc}
+                {"AND COALESCE((SELECT SUM(v2.importe) FROM vencimientos v2 WHERE v2.idcab = cc.id AND v2.tipo=1 AND v2.situacion=0),0) > 0" if solo_pendientes else ""}
+                ORDER BY cc.fecha DESC, cc.pro_nombre
+            """, params)
 
         rows = [dict(r) for r in cur.fetchall()]
         cur.close()
@@ -723,7 +843,16 @@ def vencimientos_detalle(
             return float(v) if hasattr(v, 'as_tuple') else v
 
         return {
-            "vencimientos": [{k: str(v) if k == 'fecha' else _dec(v) for k, v in r.items()} for r in rows],
+            "vencimientos": [{
+                "id": int(r["id"]),
+                "codigo": int(r["codigo"]) if r["codigo"] else 0,
+                "nombre": r["nombre"] or "",
+                "serie": r["serie"] or "",
+                "numero": int(r["numero"]),
+                "fecha": str(r["fecha"]) if r["fecha"] else "",
+                "total_fra": _dec(r["total_fra"]),
+                "pendiente": _dec(r["pendiente"]),
+            } for r in rows],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error vencimientos-detalle: {str(e)}")

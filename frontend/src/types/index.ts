@@ -199,12 +199,14 @@ export interface FraPteCobro {
 }
 
 export interface VencimientoDetalle {
+    id: number
     codigo: number
     nombre: string
     serie: string
     numero: number
     fecha: string
-    importe: number
+    total_fra: number
+    pendiente: number
 }
 
 // ── Ficha Cliente types ──────────────────────────────────────────────────
@@ -485,4 +487,29 @@ export interface LibroIVALinea {
     fpago: number
     fpago_nombre: string
     pendiente: number
+}
+
+// ── Cobros widget ────────────────────────────────────────────────────────
+
+export interface CobroDetalle {
+    cajabanco: number   // 0=Caja, 1=Banco
+    tipocobro: number
+    importe: number
+    fechacobro: string
+    cli_nombre: string
+    serie: string
+    numero: number
+}
+
+export interface CobrosPeriodo {
+    total: number
+    caja: number
+    banco: number
+    detalle: CobroDetalle[]
+}
+
+export interface CobrosResumen {
+    hoy: CobrosPeriodo
+    semana: CobrosPeriodo
+    mes: CobrosPeriodo
 }

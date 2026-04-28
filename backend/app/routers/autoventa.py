@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlmodel import Session
 
@@ -97,22 +98,40 @@ def buscar_clientes(
     try:
         conn = get_pg_connection(empresa)
         cur = conn.cursor()
+        # Split query into words for multi-word substring search
+        words = [w for w in q.strip().split() if w]
+        if not words:
+            return []
+
+        # Build one condition per word: each must appear in nombre OR alias
+        word_conditions = []
+        params: dict = {"obsoleto": 0}
+        for i, w in enumerate(words):
+            key = f"w{i}"
+            params[key] = f"%{w}%"
+            word_conditions.append(
+                f"(LOWER(nombre) LIKE LOWER(%({key})s)"
+                f" OR LOWER(COALESCE(alias, '')) LIKE LOWER(%({key})s))"
+            )
+
+        where = "obsoleto = 0 AND activo = true AND " + " AND ".join(word_conditions)
+
+        agente_codigo = current_user.agente_autoventa
+        if agente_codigo:
+            where += " AND agente = %(agente)s"
+            params["agente"] = agente_codigo
+
         cur.execute(
-            """
+            f"""
             SELECT codigo, nombre, alias, cif,
                    direccion, localidad, cpostal, provincia,
                    fpago, tarifabase, COALESCE(email, '') AS email
             FROM clientes
-            WHERE obsoleto = 0
-              AND activo = true
-              AND (
-                  LOWER(nombre) LIKE LOWER(%(q)s)
-                  OR LOWER(alias) LIKE LOWER(%(q)s)
-              )
+            WHERE {where}
             ORDER BY nombre
             LIMIT 30
             """,
-            {"q": f"%{q}%"},
+            params,
         )
         return [dict(r) for r in cur.fetchall()]
     except Exception as e:
@@ -144,9 +163,14 @@ def consumo_90dias(
                 SUM(vl.unidades)::numeric          AS uds_total,
                 MAX(vl.precio)::numeric             AS ultimo_precio,
                 MAX(vc.fecha)                       AS ultima_fecha,
-                COALESCE(AVG(vl.piva), 0)::numeric  AS piva
+                COALESCE(AVG(vl.piva), 0)::numeric  AS piva,
+                COALESCE(MAX(a.control_lotes::int), 0)::bool  AS control_lotes,
+                EXISTS(
+                    SELECT 1 FROM articulos_imagenes ai WHERE ai.referencia = vl.referencia LIMIT 1
+                )                                  AS tiene_imagen
             FROM ventas_lineas vl
             JOIN ventas_cabeceras vc ON vc.id = vl.idcab
+            LEFT JOIN articulos a ON a.referencia = vl.referencia
             WHERE vc.cli_codigo   = %(cli)s
               AND vc.tipodoc      IN (2, 4, 8)
               AND vc.fecha        >= CURRENT_DATE - INTERVAL '90 days'
@@ -168,6 +192,8 @@ def consumo_90dias(
                 "ultimo_precio": float(r["ultimo_precio"]),
                 "ultima_fecha": r["ultima_fecha"].isoformat() if r["ultima_fecha"] else None,
                 "piva": float(r["piva"]),
+                "control_lotes": bool(r["control_lotes"]),
+                "tiene_imagen": bool(r["tiene_imagen"]),
             })
         return rows
     except Exception as e:
@@ -210,27 +236,42 @@ def buscar_articulos(
         tarifaespecial = int(cli["tarifaespecial"] or 0)
 
         # Search articles with base tariff price and IVA %
+        # Multi-word search: each word must appear in referencia OR nombre
+        words = [w for w in q.strip().split() if w]
+        if not words:
+            return []
+        word_conds = []
+        art_params: dict = {"tarifa": tarifabase}
+        for i, w in enumerate(words):
+            key = f"w{i}"
+            art_params[key] = f"%{w}%"
+            word_conds.append(
+                f"(LOWER(a.referencia) LIKE LOWER(%({key})s) OR LOWER(a.nombre) LIKE LOWER(%({key})s))"
+            )
+        art_where = " AND ".join(word_conds)
+
         cur.execute(
-            """
+            f"""
             SELECT
                 a.referencia,
                 a.nombre,
                 a.familia,
                 COALESCE(ti.iva, 21.0)::float       AS piva,
-                COALESCE(ap.precio, 0.0)::float      AS precio_base
+                COALESCE(ap.precio, 0.0)::float      AS precio_base,
+                COALESCE(a.control_lotes, false)     AS control_lotes,
+                EXISTS(
+                    SELECT 1 FROM articulos_imagenes ai WHERE ai.referencia = a.referencia LIMIT 1
+                )                                    AS tiene_imagen
             FROM articulos a
             LEFT JOIN tipos_iva ti    ON ti.codigo = a.tipoiva
             LEFT JOIN articulos_precios ap
                    ON ap.referencia = a.referencia AND ap.tarifa = %(tarifa)s
             WHERE a.obsoleto = 0
-              AND (
-                  LOWER(a.referencia) LIKE LOWER(%(q)s)
-                  OR LOWER(a.nombre)  LIKE LOWER(%(q)s)
-              )
+              AND {art_where}
             ORDER BY a.nombre
             LIMIT 20
             """,
-            {"tarifa": tarifabase, "q": f"%{q}%"},
+            art_params,
         )
         rows = [dict(r) for r in cur.fetchall()]
         if not rows:
@@ -311,6 +352,8 @@ def buscar_articulos(
                 "nombre": r["nombre"],
                 "precio": round(float(precio), 6),
                 "piva": r["piva"],
+                "control_lotes": r.get("control_lotes") or False,
+                "tiene_imagen": r.get("tiene_imagen") or False,
             })
 
         return result
@@ -319,6 +362,106 @@ def buscar_articulos(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error BD: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ── Imagen miniatura de artículo ──────────────────────────────────────────
+
+@router.get("/articulos/{referencia}/imagen")
+def get_articulo_imagen(
+    referencia: str,
+    current_user: Usuario = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Returns the thumbnail image for an article (first image, orden=1)."""
+    _require_autoventa(current_user)
+    empresa = _get_empresa(current_user, session)
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT imagentmb FROM articulos_imagenes WHERE referencia = %s ORDER BY orden LIMIT 1",
+            (referencia,),
+        )
+        row = cur.fetchone()
+        if not row or not row["imagentmb"]:
+            raise HTTPException(status_code=404, detail="Sin imagen")
+        oid = row["imagentmb"]
+        cur.execute("SELECT lo_get(%s) AS data", (oid,))
+        data_row = cur.fetchone()
+        if not data_row or not data_row["data"]:
+            raise HTTPException(status_code=404, detail="Sin imagen")
+        img_bytes = bytes(data_row["data"])
+        # Detect content type by magic bytes
+        if img_bytes[:3] == b'\xff\xd8\xff':
+            media_type = "image/jpeg"
+        elif img_bytes[:4] == b'\x89PNG':
+            media_type = "image/png"
+        elif img_bytes[:4] in (b'GIF8', b'GIF9'):
+            media_type = "image/gif"
+        else:
+            media_type = "image/jpeg"
+        return Response(content=img_bytes, media_type=media_type,
+                        headers={"Cache-Control": "public, max-age=86400"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error imagen: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ── Lotes disponibles de un artículo ─────────────────────────────────────
+
+@router.get("/articulos/{referencia}/lotes")
+def get_articulo_lotes(
+    referencia: str,
+    current_user: Usuario = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Returns available lots (stock > 0) for a lot-controlled article, sorted FEFO."""
+    _require_autoventa(current_user)
+    empresa = _get_empresa(current_user, session)
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                al.id,
+                al.lote,
+                al.fecha_compra,
+                al.fecha_caducidad,
+                COALESCE(SUM(als.unidades), 0)::float AS stock
+            FROM articulos_lotes al
+            LEFT JOIN articulos_lotes_stock als ON als.id_lote = al.id
+            WHERE al.referencia = %s
+            GROUP BY al.id, al.lote, al.fecha_compra, al.fecha_caducidad
+            HAVING COALESCE(SUM(als.unidades), 0) > 0
+            ORDER BY al.fecha_caducidad ASC NULLS LAST, al.fecha_compra ASC
+            """,
+            (referencia,),
+        )
+        rows = cur.fetchall()
+        result = []
+        for r in rows:
+            result.append({
+                "id": r["id"],
+                "lote": r["lote"],
+                "fecha_compra": r["fecha_compra"].isoformat() if r["fecha_compra"] else None,
+                "fecha_caducidad": r["fecha_caducidad"].isoformat() if r["fecha_caducidad"] else None,
+                "stock": r["stock"],
+            })
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error lotes: {e}")
     finally:
         if conn:
             conn.close()

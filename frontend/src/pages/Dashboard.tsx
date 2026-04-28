@@ -10,7 +10,7 @@ import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, Legend
 } from 'recharts'
-import type { CuadroMandosData, ProductoFamilia, VencimientosResumen, FacturaDoc, VencimientoDetalle, DocDetalle, FraPteCobro } from '../types'
+import type { CuadroMandosData, ProductoFamilia, VencimientosResumen, FacturaDoc, VencimientoDetalle, DocDetalle, FraPteCobro, CobrosResumen } from '../types'
 import FichaCliente from '../components/FichaCliente'
 import FichaProveedor from '../components/FichaProveedor'
 
@@ -61,6 +61,7 @@ export default function Dashboard() {
     const [facturasDetalle, setFacturasDetalle] = useState<FacturaDoc[]>([])
     const [vtosDetalle, setVtosDetalle] = useState<VencimientoDetalle[]>([])
     const [vtoSearch, setVtoSearch] = useState('')
+    const [vtoPendientes, setVtoPendientes] = useState(true)
 
     // IVA trimestral modal
     const [ivaModal, setIvaModal] = useState(false)
@@ -76,10 +77,10 @@ export default function Dashboard() {
     const [vtoModalOpen, setVtoModalOpen] = useState(false)
 
     // Pte. Cobro facturas modal
-    const [pteCobro, setPteCobro] = useState<{ open: boolean; serie: string; loading: boolean; facturas: FraPteCobro[]; search: string; error: string; totalPendiente: number; totalFacturas: number }>({ open: false, serie: '', loading: false, facturas: [], search: '', error: '', totalPendiente: 0, totalFacturas: 0 })
+    const [pteCobro, setPteCobro] = useState<{ open: boolean; serie: string; loading: boolean; facturas: FraPteCobro[]; search: string; error: string; totalPendiente: number; totalFacturas: number; soloPendientes: boolean }>({ open: false, serie: '', loading: false, facturas: [], search: '', error: '', totalPendiente: 0, totalFacturas: 0, soloPendientes: true })
 
     const openPteCobro = async (serie = '') => {
-        setPteCobro(s => ({ ...s, open: true, serie, loading: true, facturas: [], search: '', error: '', totalPendiente: 0, totalFacturas: 0 }))
+        setPteCobro(s => ({ ...s, open: true, serie, loading: true, facturas: [], search: '', error: '', totalPendiente: 0, totalFacturas: 0, soloPendientes: s.soloPendientes }))
         try {
             const p: Record<string, unknown> = { ...commonParams() }
             if (serie) p.serie = serie
@@ -96,6 +97,10 @@ export default function Dashboard() {
     const [docModal, setDocModal] = useState<{ tipo: 'venta' | 'compra'; docId: number; titulo: string } | null>(null)
     const [docDetalle, setDocDetalle] = useState<DocDetalle | null>(null)
     const [docLoading, setDocLoading] = useState(false)
+
+    // Cobros resumen (Hoy / Semana / Mes)
+    const [cobrosResumen, setCobrosResumen] = useState<CobrosResumen | null>(null)
+    const [cobrosModal, setCobrosModal] = useState<{ open: boolean; periodo: 'hoy' | 'semana' | 'mes' } | null>(null)
 
     // Ficha Cliente
     const [fichaCliente, setFichaCliente] = useState<{ codigo: number; nombre: string } | null>(null)
@@ -158,11 +163,18 @@ export default function Dashboard() {
             const params: Record<string, unknown> = { anio, mes_desde: mesDesde, mes_hasta: mesHasta }
             if (selectedSeries.length > 0) params.series = selectedSeries
             if (agente) params.agente = parseInt(agente)
-            const { data: d } = await api.get<CuadroMandosData>('/api/dashboard/cuadro-mandos', {
-                params,
-                paramsSerializer: { indexes: null },
-            })
+            const [{ data: d }, cobrosResp] = await Promise.all([
+                api.get<CuadroMandosData>('/api/dashboard/cuadro-mandos', {
+                    params,
+                    paramsSerializer: { indexes: null },
+                }),
+                api.get<CobrosResumen>('/api/dashboard/cobros-resumen', {
+                    params: { ...(selectedSeries.length > 0 ? { series: selectedSeries } : {}), ...(agente ? { agente: parseInt(agente) } : {}) },
+                    paramsSerializer: { indexes: null },
+                }).catch(() => null),
+            ])
             setData(d)
+            if (cobrosResp) setCobrosResumen(cobrosResp.data)
             setVtoData(null)
             setVtoDesde('')
             setVtoHasta('')
@@ -218,13 +230,14 @@ export default function Dashboard() {
     }
 
     // Open vencimientos detail modal
-    const openVencimientos = async (tipo: 0 | 1) => {
+    const openVencimientos = async (tipo: 0 | 1, soloPend?: boolean) => {
+        const sp = soloPend ?? vtoPendientes
         setDetailModal({ type: 'vto', title: tipo === 0 ? 'Vencimientos Clientes' : 'Facturas Pendientes de Pago' })
         setDetailLoading(true)
         setVtosDetalle([])
         setVtoSearch('')
         try {
-            const p: Record<string, unknown> = { tipo }
+            const p: Record<string, unknown> = { tipo, solo_pendientes: sp, anio }
             if (vtoDesde) p.fecha_desde = vtoDesde
             if (vtoHasta) p.fecha_hasta = vtoHasta
             if (selectedSeries.length > 0) p.series = selectedSeries
@@ -385,15 +398,39 @@ export default function Dashboard() {
                         </div>
                         <div className="flex-1 flex flex-col min-h-0">
                             {detailModal.type === 'vto' && (
-                                <div className="px-4 pt-3 pb-2 border-b">
+                                <div className="flex items-center gap-3 px-4 pt-3 pb-2 border-b bg-slate-50">
                                     <input
                                         type="text"
-                                        placeholder="Buscar por cliente / proveedor..."
+                                        placeholder="Buscar proveedor / cliente..."
                                         value={vtoSearch}
                                         onChange={e => setVtoSearch(e.target.value)}
-                                        className="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-brand"
+                                        className="flex-1 border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-brand"
                                         autoFocus
                                     />
+                                    <label className="flex items-center gap-1.5 cursor-pointer select-none whitespace-nowrap">
+                                        <input
+                                            type="checkbox"
+                                            checked={vtoPendientes}
+                                            onChange={e => {
+                                                const v = e.target.checked
+                                                setVtoPendientes(v)
+                                                const tipo = detailModal.title === 'Vencimientos Clientes' ? 0 : 1
+                                                openVencimientos(tipo, v)
+                                            }}
+                                            className="accent-red-500"
+                                        />
+                                        <span className="text-xs font-medium text-slate-600">Pendientes</span>
+                                    </label>
+                                    {!detailLoading && vtosDetalle.length > 0 && (() => {
+                                        const vis = vtoSearch
+                                            ? vtosDetalle.filter(v => v.nombre.toLowerCase().includes(vtoSearch.toLowerCase()))
+                                            : vtosDetalle
+                                        return (
+                                            <span className="text-xs font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded whitespace-nowrap">
+                                                {fmt(vis.reduce((a, v) => a + v.pendiente, 0))} € ({vis.length})
+                                            </span>
+                                        )
+                                    })()}
                                 </div>
                             )}
                             <div className="overflow-auto flex-1 p-4">
@@ -411,25 +448,38 @@ export default function Dashboard() {
                                             <th className="text-left py-1.5 pr-2">Serie</th>
                                             <th className="text-right py-1.5 pr-2">Número</th>
                                             <th className="text-left py-1.5 pr-2">Fecha</th>
-                                            <th className="text-right py-1.5">Importe</th>
+                                            <th className="text-right py-1.5 pr-2">Total Fra.</th>
+                                            <th className="text-right py-1.5 pr-2 text-red-600">Pendiente</th>
+                                            <th className="text-center py-1.5">Estado</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {filtered.map((v, i) => (
-                                            <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
-                                                <td className="py-1 pr-2 truncate max-w-[220px]" title={v.nombre}>{v.nombre}</td>
+                                            <tr key={i} className="border-b border-slate-50 hover:bg-red-50 cursor-pointer"
+                                                onClick={() => openDocumento(v.id, detailModal.title === 'Vencimientos Clientes' ? 'venta' : 'compra', `${v.serie}/${String(v.numero).padStart(6, '0')}`)}>
+                                                <td className="py-1 pr-2 truncate max-w-[180px]" title={v.nombre}>{v.nombre}</td>
                                                 <td className="py-1 pr-2">{v.serie}</td>
                                                 <td className="text-right py-1 pr-2">{v.numero}</td>
                                                 <td className="py-1 pr-2">{v.fecha}</td>
-                                                <td className="text-right py-1 font-medium">{fmt(v.importe)} €</td>
+                                                <td className="text-right py-1 pr-2 text-slate-500">{fmt(v.total_fra)} €</td>
+                                                <td className="text-right py-1 pr-2 font-semibold text-red-600">{fmt(v.pendiente)} €</td>
+                                                <td className="text-center py-1">
+                                                    {v.pendiente <= 0
+                                                        ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Pagado</span>
+                                                        : v.pendiente < v.total_fra
+                                                            ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">A Cuenta</span>
+                                                            : <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Pendiente</span>}
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
                                     {filtered.length > 0 && (
                                         <tfoot>
                                             <tr className="font-bold border-t border-slate-300">
-                                                <td colSpan={4} className="py-1.5 pr-2">TOTAL ({filtered.length} vtos.)</td>
-                                                <td className="text-right py-1.5 font-bold">{fmt(filtered.reduce((a, v) => a + v.importe, 0))} €</td>
+                                                <td colSpan={4} className="py-1.5 pr-2">TOTAL ({filtered.length} fras.)</td>
+                                                <td className="text-right py-1.5 pr-2 text-slate-500">{fmt(filtered.reduce((a, v) => a + v.total_fra, 0))} €</td>
+                                                <td className="text-right py-1.5 text-red-600">{fmt(filtered.reduce((a, v) => a + v.pendiente, 0))} €</td>
+                                                <td />
                                             </tr>
                                         </tfoot>
                                     )}
@@ -842,7 +892,23 @@ export default function Dashboard() {
                             </div>
                             <KPICard icon={<ShoppingCart className="w-4 h-4" />} label="Total Compras" value={fmt(data.totales.compras)} color="text-orange-600" />
                             <KPICard icon={<TrendingUp className="w-4 h-4" />} label="Beneficio" value={fmt(data.beneficio.beneficio)} color="text-green-600" sub={`${((data.beneficio.beneficio / (data.beneficio.ventas || 1)) * 100).toFixed(1)}% margen`} />
-                            <KPICard icon={<CreditCard className="w-4 h-4" />} label="Cobros" value={fmt(data.totales.cobros)} color="text-emerald-600" />
+                            <KPICard icon={<CreditCard className="w-4 h-4" />} label="Cobros" value={fmt(data.totales.cobros)} color="text-emerald-600" hideValue
+                                customContent={cobrosResumen ? (
+                                    <div className="space-y-0.5">
+                                        {(['hoy', 'semana', 'mes'] as const).map((p) => {
+                                            const labels = { hoy: 'Hoy', semana: 'Semana', mes: 'Mes' }
+                                            const periodo = cobrosResumen[p]
+                                            return (
+                                                <button key={p} onClick={() => setCobrosModal({ open: true, periodo: p })}
+                                                    className="w-full flex justify-between items-center text-xs hover:bg-emerald-50 rounded px-1 py-1 group transition-colors">
+                                                    <span className="text-slate-500 group-hover:text-emerald-700 font-medium">{labels[p]}</span>
+                                                    <span className="font-bold text-emerald-700">{fmt(periodo.total)} €</span>
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                ) : undefined}
+                            />
                             <KPICard icon={<Wallet className="w-4 h-4" />} label="Pte. Cobro" value={fmt(data.vencimientos.clientes)} color="text-amber-600" onClick={() => openPteCobro()} />
                             <KPICard icon={<TrendingDown className="w-4 h-4" />} label="Pte. Pago" value={fmt(data.vencimientos.proveedores)} color="text-red-600" onClick={() => openVencimientos(1)} />
                         </div>
@@ -1008,9 +1074,19 @@ export default function Dashboard() {
                                     className="w-full border rounded px-3 py-1 text-sm focus:outline-none focus:border-brand"
                                 />
                             </div>
+                            <label className="flex items-center gap-1.5 cursor-pointer select-none whitespace-nowrap">
+                                <input
+                                    type="checkbox"
+                                    checked={pteCobro.soloPendientes}
+                                    onChange={e => setPteCobro(s => ({ ...s, soloPendientes: e.target.checked }))}
+                                    className="accent-amber-500"
+                                />
+                                <span className="text-xs font-medium text-slate-600">Pendientes</span>
+                            </label>
                             {pteCobro.facturas.length > 0 && (
                                 <span className="text-xs text-slate-500 whitespace-nowrap">
                                     {pteCobro.facturas.filter(f => {
+                                        if (pteCobro.soloPendientes && f.pendiente <= 0) return false
                                         if (!pteCobro.search) return true
                                         const terms = pteCobro.search.toLowerCase().split(/\s+/).filter(Boolean)
                                         const txt = f.cli_nombre.toLowerCase()
@@ -1026,13 +1102,13 @@ export default function Dashboard() {
                             {pteCobro.loading ? (
                                 <div className="text-center text-slate-400 py-8">Cargando...</div>
                             ) : (() => {
-                                const filtered = pteCobro.search
-                                    ? pteCobro.facturas.filter(f => {
-                                        const terms = pteCobro.search.toLowerCase().split(/\s+/).filter(Boolean)
-                                        const txt = f.cli_nombre.toLowerCase()
-                                        return terms.every(t => txt.includes(t))
-                                    })
-                                    : pteCobro.facturas
+                                const filtered = pteCobro.facturas.filter(f => {
+                                    if (pteCobro.soloPendientes && f.pendiente <= 0) return false
+                                    if (!pteCobro.search) return true
+                                    const terms = pteCobro.search.toLowerCase().split(/\s+/).filter(Boolean)
+                                    const txt = f.cli_nombre.toLowerCase()
+                                    return terms.every(t => txt.includes(t))
+                                })
                                 return (
                                     <table className="w-full text-xs">
                                         <thead>
@@ -1073,6 +1149,91 @@ export default function Dashboard() {
                 </div>
             )}
 
+            {/* Cobros Modal (Hoy / Semana / Mes) */}
+            {cobrosModal?.open && cobrosResumen && (() => {
+                const labels = { hoy: 'Cobros de Hoy', semana: 'Cobros de la Semana', mes: 'Cobros del Mes' }
+                const periodo = cobrosResumen[cobrosModal.periodo]
+                return (
+                    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+                        onClick={() => setCobrosModal(null)}>
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col"
+                            onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+                                <div className="flex items-center gap-3">
+                                    <h2 className="text-sm font-bold text-slate-700">{labels[cobrosModal.periodo]}</h2>
+                                    <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+                                        Total: {fmt(periodo.total)} €
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {(['hoy', 'semana', 'mes'] as const).map(p => (
+                                        <button key={p} onClick={() => setCobrosModal({ open: true, periodo: p })}
+                                            className={`text-xs px-2 py-0.5 rounded font-medium transition-colors ${cobrosModal.periodo === p ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
+                                            {p === 'hoy' ? 'Hoy' : p === 'semana' ? 'Semana' : 'Mes'}
+                                        </button>
+                                    ))}
+                                    <button onClick={() => setCobrosModal(null)} className="text-slate-400 hover:text-slate-600 ml-2"><X className="w-5 h-5" /></button>
+                                </div>
+                            </div>
+                            {/* Resumen Caja / Banco */}
+                            <div className="flex gap-4 px-5 py-3 bg-slate-50 border-b">
+                                <div className="flex-1 bg-white rounded-lg border px-4 py-2 text-center">
+                                    <div className="text-[10px] text-slate-500 mb-0.5">Caja</div>
+                                    <div className="text-base font-bold text-emerald-700">{fmt(periodo.caja)} €</div>
+                                </div>
+                                <div className="flex-1 bg-white rounded-lg border px-4 py-2 text-center">
+                                    <div className="text-[10px] text-slate-500 mb-0.5">Banco</div>
+                                    <div className="text-base font-bold text-blue-700">{fmt(periodo.banco)} €</div>
+                                </div>
+                                <div className="flex-1 bg-white rounded-lg border px-4 py-2 text-center">
+                                    <div className="text-[10px] text-slate-500 mb-0.5">Total</div>
+                                    <div className="text-base font-bold text-slate-700">{fmt(periodo.total)} €</div>
+                                </div>
+                            </div>
+                            {/* Detalle */}
+                            <div className="overflow-auto flex-1 p-4">
+                                {periodo.detalle.length === 0 ? (
+                                    <div className="text-center text-slate-400 py-8 text-sm">No hay cobros en este periodo</div>
+                                ) : (
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 text-slate-500">
+                                                <th className="text-left py-1.5 pr-2">Fecha</th>
+                                                <th className="text-left py-1.5 pr-2">Cliente</th>
+                                                <th className="text-left py-1.5 pr-2">Doc</th>
+                                                <th className="text-left py-1.5 pr-2">Medio</th>
+                                                <th className="text-right py-1.5">Importe</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {periodo.detalle.map((c, i) => (
+                                                <tr key={i} className="border-b border-slate-50 hover:bg-emerald-50">
+                                                    <td className="py-1 pr-2">{c.fechacobro}</td>
+                                                    <td className="py-1 pr-2 truncate max-w-[200px]" title={c.cli_nombre}>{c.cli_nombre}</td>
+                                                    <td className="py-1 pr-2 font-mono text-slate-600">{c.serie}/{String(c.numero).padStart(6,'0')}</td>
+                                                    <td className="py-1 pr-2">
+                                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${c.cajabanco === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                            {c.cajabanco === 0 ? 'Caja' : 'Banco'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="text-right py-1 font-semibold text-emerald-700">{fmt(c.importe)} €</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot>
+                                            <tr className="font-bold border-t border-slate-300">
+                                                <td colSpan={4} className="py-1.5 pr-2">TOTAL ({periodo.detalle.length})</td>
+                                                <td className="text-right py-1.5 text-emerald-700">{fmt(periodo.total)} €</td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )
+            })()}
+
             {/* Ficha Cliente Modal */}
             {fichaCliente && (
                 <FichaCliente
@@ -1095,15 +1256,16 @@ export default function Dashboard() {
     )
 }
 
-function KPICard({ icon, label, value, color, sub, onClick }: { icon: React.ReactNode; label: string; value: string; color: string; sub?: string; onClick?: () => void }) {
+function KPICard({ icon, label, value, color, sub, onClick, customContent, hideValue }: { icon: React.ReactNode; label: string; value: string; color: string; sub?: string; onClick?: () => void; customContent?: React.ReactNode; hideValue?: boolean }) {
     return (
         <div className={`card flex flex-col ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`} onClick={onClick}>
             <div className="flex items-center gap-1.5 mb-1">
                 <span className={color}>{icon}</span>
                 <span className="text-xs text-slate-500">{label}</span>
             </div>
-            <span className={`text-lg font-bold ${color}`}>{value} €</span>
+            {!hideValue && <span className={`text-lg font-bold ${color}`}>{value} €</span>}
             {sub && <span className="text-[10px] text-slate-400 mt-0.5">{sub}</span>}
+            {customContent}
         </div>
     )
 }
