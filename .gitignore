@@ -16,6 +16,7 @@ backend/build/
 
 # Node
 node_modules/
+frontend/dist/
 
 # Docker volumes
 postgres_data/
