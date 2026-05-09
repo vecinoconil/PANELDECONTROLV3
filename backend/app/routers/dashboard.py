@@ -9,21 +9,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, get_empresa_from_local
 from app.database import get_session
 from app.models.app_models import Empresa, Usuario
 from app.services.pg_connection import get_pg_connection
 
 router = APIRouter()
-
-
-def _get_empresa(user: Usuario, session: Session) -> Empresa:
-    if not user.empresa_id:
-        raise HTTPException(status_code=400, detail="Usuario sin empresa asignada")
-    empresa = session.get(Empresa, user.empresa_id)
-    if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada")
-    return empresa
 
 
 @router.get("/cuadro-mandos")
@@ -33,10 +24,10 @@ def cuadro_mandos(
     mes_hasta: int = Query(default=12, ge=1, le=12),
     series: Optional[list[str]] = Query(default=None),
     agente: Optional[int] = Query(default=None),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
 
     if anio is None:
         anio = date.today().year
@@ -222,12 +213,13 @@ def cuadro_mandos(
         """, params)
         pte_cobro = float(cur.fetchone()["total_pte"])
 
-        # tipo=1: compra (proveedores → pte pago) — siempre año completo
+        # tipo=1: compra (proveedores → pte pago) — siempre año completo, solo facturas (tipodoc=8)
         cur.execute("""
             SELECT COALESCE(SUM(v.importe), 0) AS total_pte
             FROM vencimientos v
             JOIN compras_cabeceras cc ON v.idcab = cc.id
             WHERE v.tipo = 1 AND v.situacion = 0
+              AND cc.tipodoc = 8
               AND cc.fecha >= %(anio_desde)s AND cc.fecha < %(anio_hasta)s
         """, {**params, "anio_desde": f"{anio}-01-01", "anio_hasta": f"{anio + 1}-01-01"})
         pte_pago = float(cur.fetchone()["total_pte"])
@@ -389,11 +381,11 @@ def cuadro_mandos(
 def cobros_resumen(
     series: Optional[list[str]] = Query(default=None),
     agente: Optional[int] = Query(default=None),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
     """Cobros de Hoy / Semana / Mes desglosados por Caja y Banco."""
-    empresa = _get_empresa(current_user, session)
     conn = None
     try:
         conn = get_pg_connection(empresa)
@@ -501,10 +493,10 @@ def productos_familia(
     mes_hasta: int = Query(default=12, ge=1, le=12),
     series: Optional[list[str]] = Query(default=None),
     agente: Optional[int] = Query(default=None),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     if anio is None:
         anio = date.today().year
 
@@ -570,10 +562,10 @@ def vencimientos_resumen(
     fecha_desde: Optional[str] = Query(default=None),
     fecha_hasta: Optional[str] = Query(default=None),
     series: Optional[list[str]] = Query(default=None),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
 
     conn = None
     try:
@@ -655,10 +647,10 @@ def facturas_cliente(
     mes_hasta: int = Query(default=12, ge=1, le=12),
     series: Optional[list[str]] = Query(default=None),
     agente: Optional[int] = Query(default=None),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     if anio is None:
         anio = date.today().year
     fecha_desde = f"{anio}-{mes_desde:02d}-01"
@@ -719,10 +711,10 @@ def facturas_proveedor(
     anio: int = Query(default=None),
     mes_desde: int = Query(default=1, ge=1, le=12),
     mes_hasta: int = Query(default=12, ge=1, le=12),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     if anio is None:
         anio = date.today().year
     fecha_desde = f"{anio}-{mes_desde:02d}-01"
@@ -772,10 +764,10 @@ def vencimientos_detalle(
     fecha_hasta: Optional[str] = Query(default=None),
     series: Optional[list[str]] = Query(default=None),
     solo_pendientes: bool = Query(default=True),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
 
     conn = None
     try:
@@ -830,7 +822,7 @@ def vencimientos_detalle(
                 FROM compras_cabeceras cc
                 WHERE cc.tipodoc = 8
                   {anio_cond_cc}
-                {"AND COALESCE((SELECT SUM(v2.importe) FROM vencimientos v2 WHERE v2.idcab = cc.id AND v2.tipo=1 AND v2.situacion=0),0) > 0" if solo_pendientes else ""}
+                {"AND COALESCE((SELECT SUM(v2.importe) FROM vencimientos v2 WHERE v2.idcab = cc.id AND v2.tipo=1 AND v2.situacion=0),0) <> 0" if solo_pendientes else ""}
                 ORDER BY cc.fecha DESC, cc.pro_nombre
             """, params)
 
@@ -869,11 +861,11 @@ def facturas_pte_cobro(
     series: Optional[list[str]] = Query(default=None),
     agente: Optional[int] = Query(default=None),
     serie: Optional[str] = Query(default=None),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
     """Facturas con importe pendiente de cobro."""
-    empresa = _get_empresa(current_user, session)
     conn = None
     try:
         conn = get_pg_connection(empresa)
@@ -975,11 +967,11 @@ def facturas_pte_cobro(
 def iva_trimestral(
     anio: int = Query(default=None, description="Año"),
     series: Optional[list[str]] = Query(default=None),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
     """IVA repercutido vs soportado por trimestre."""
-    empresa = _get_empresa(current_user, session)
     if anio is None:
         anio = date.today().year
 
@@ -1054,11 +1046,11 @@ def iva_trimestral(
 def detalle_documento(
     doc_id: int = Query(..., description="ID de la cabecera"),
     tipo: str = Query(..., description="'venta' o 'compra'"),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
     """Devuelve cabecera + líneas de un documento (factura/albarán) de venta o compra."""
-    empresa = _get_empresa(current_user, session)
 
     if tipo not in ("venta", "compra"):
         raise HTTPException(status_code=400, detail="tipo debe ser 'venta' o 'compra'")
@@ -1140,10 +1132,10 @@ def detalle_documento(
 def ficha_cliente(
     cli_codigo: int = Query(..., description="Código cliente"),
     anio: int = Query(default=None, description="Año"),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     if anio is None:
         anio = date.today().year
 
@@ -1423,10 +1415,10 @@ def ficha_cliente(
 def ficha_proveedor(
     pro_codigo: int = Query(..., description="Código proveedor"),
     anio: int = Query(default=None, description="Año"),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     if anio is None:
         anio = date.today().year
 
@@ -1659,10 +1651,10 @@ def ficha_agente(
     comision_anio: int = Query(default=None, description="Año para comisiones"),
     comision_mes: int = Query(default=None, description="Mes para comisiones (1-12)"),
     comision_dias_max: int = Query(default=90, description="Máx días de pago comisionable"),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     if anio is None:
         anio = date.today().year
     if fecha_analisis is None:

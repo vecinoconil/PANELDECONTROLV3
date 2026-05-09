@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
-import { X, ChevronRight, ChevronDown, AlertTriangle, FileText, ShoppingBag, ClipboardList } from 'lucide-react'
+import { X, ChevronRight, ChevronDown, AlertTriangle, FileText, ShoppingBag, ClipboardList, ScrollText, CheckCircle } from 'lucide-react'
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, Legend
@@ -9,6 +9,18 @@ import type { FichaClienteData, FichaClienteFamilia, DocDetalle } from '../types
 
 const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 const DIAS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+const PERIOD_LABEL: Record<number, string> = { 0: 'Sin periodo', 1: 'Mensual', 3: 'Trimestral', 6: 'Semestral', 12: 'Anual' }
+
+interface ContratoCli {
+    id: number
+    tipo_nombre: string
+    cuota_recibo: number
+    periodicidad: number
+    meses_activos: string
+    fecha_baja: string | null
+    desactivado: boolean
+    impago: boolean
+}
 const LINE_COLORS = ['#2563eb', '#16a34a', '#dc2626']
 
 function fmt(n: number): string {
@@ -31,8 +43,12 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
     const [data, setData] = useState<FichaClienteData | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
-    const [tab, setTab] = useState<'productos' | 'documentos' | 'presupuestos'>('documentos')
+    const [tab, setTab] = useState<'productos' | 'documentos' | 'presupuestos' | 'contratos'>('documentos')
     const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+    // Contratos del cliente
+    const [contratos, setContratos] = useState<ContratoCli[] | null>(null)
+    const [contratosLoading, setContratosLoading] = useState(false)
 
     // Document detail modal (reuse pattern)
     const [docModal, setDocModal] = useState<{ tipo: string; docId: number; titulo: string } | null>(null)
@@ -67,6 +83,18 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
             return next
         })
     }
+
+    const loadContratos = useCallback(async () => {
+        if (contratos !== null) return
+        setContratosLoading(true)
+        try {
+            const { data: d } = await api.get('/api/contratos/lista', {
+                params: { cli_codigo: cliCodigo, solo_activos: false }
+            })
+            setContratos(d.contratos)
+        } catch { setContratos([]) }
+        finally { setContratosLoading(false) }
+    }, [cliCodigo, contratos])
 
     const openDocumento = async (docId: number, titulo: string) => {
         setDocModal({ tipo: 'venta', docId, titulo })
@@ -148,10 +176,10 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
     }
 
     return (
-        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-2 sm:p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-[1600px] h-[95vh] flex flex-col overflow-hidden">
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-3 border-b bg-slate-50 shrink-0">
+                <div className="flex items-center justify-between px-3 sm:px-6 py-3 border-b bg-slate-50 shrink-0">
                     <h2 className="text-lg font-bold text-slate-800 truncate">
                         {data.cliente.nombre}
                         {data.cliente.alias && <span className="ml-2 text-sm font-normal text-slate-500">({data.cliente.alias})</span>}
@@ -168,10 +196,10 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
                 </div>
 
                 {/* Body */}
-                <div className="flex-1 overflow-hidden p-4">
-                    <div className="grid grid-cols-12 gap-4 h-full">
+                <div className="flex-1 overflow-auto md:overflow-hidden p-3 md:p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:h-full">
                         {/* ═══ LEFT COLUMN: Chart + Tabs ═══ */}
-                        <div className="col-span-6 flex flex-col gap-4 h-full min-h-0">
+                        <div className="md:col-span-6 flex flex-col gap-4 md:h-full md:min-h-0">
                             {/* Line Chart */}
                             <div className="bg-white border rounded-lg p-3 shrink-0" style={{ height: 260 }}>
                                 <ResponsiveContainer width="100%" height="100%">
@@ -190,20 +218,24 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
                             </div>
 
                             {/* Tabs */}
-                            <div className="bg-white border rounded-lg flex-1 flex flex-col min-h-0">
-                                <div className="flex border-b shrink-0">
+                            <div className="bg-white border rounded-lg flex flex-col min-h-[320px] md:flex-1 md:min-h-0">
+                                <div className="flex border-b shrink-0 overflow-x-auto">
                                     <button
-                                        className={`px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 ${tab === 'documentos' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                                        className={`px-3 sm:px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 shrink-0 whitespace-nowrap ${tab === 'documentos' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
                                         onClick={() => setTab('documentos')}
-                                    ><FileText size={14} /> Documentos Venta</button>
+                                    ><FileText size={14} /> <span className="hidden sm:inline">Documentos </span>Venta</button>
                                     <button
-                                        className={`px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 ${tab === 'productos' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                                        className={`px-3 sm:px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 shrink-0 whitespace-nowrap ${tab === 'productos' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
                                         onClick={() => setTab('productos')}
-                                    ><ShoppingBag size={14} /> Productos consumidos</button>
+                                    ><ShoppingBag size={14} /> <span className="hidden sm:inline">Productos </span>Consumidos</button>
                                     <button
-                                        className={`px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 ${tab === 'presupuestos' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                                        className={`px-3 sm:px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 shrink-0 whitespace-nowrap ${tab === 'presupuestos' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
                                         onClick={() => setTab('presupuestos')}
-                                    ><ClipboardList size={14} /> Pedidos Cliente</button>
+                                    ><ClipboardList size={14} /> Pedidos</button>
+                                    <button
+                                        className={`px-3 sm:px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 shrink-0 whitespace-nowrap ${tab === 'contratos' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                                        onClick={() => { setTab('contratos'); loadContratos() }}
+                                    ><ScrollText size={14} /> Contratos</button>
                                 </div>
 
                                 <div className="flex-1 overflow-auto p-2">
@@ -314,14 +346,67 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
                                             </tbody>
                                         </table>
                                     )}
+                                    {/* TAB: Contratos */}
+                                    {tab === 'contratos' && (
+                                        contratosLoading
+                                            ? <div className="flex justify-center py-8"><div className="animate-spin h-5 w-5 border-3 border-indigo-500 border-t-transparent rounded-full" /></div>
+                                            : <table className="w-full text-xs">
+                                                <thead className="sticky top-0 bg-white">
+                                                    <tr className="text-slate-500 border-b">
+                                                        <th className="text-left py-1 px-2 font-medium">Tipo</th>
+                                                        <th className="text-left py-1 px-2 font-medium hidden sm:table-cell">Meses cobro</th>
+                                                        <th className="text-left py-1 px-2 font-medium hidden md:table-cell">Periodo</th>
+                                                        <th className="text-right py-1 px-2 font-medium">Cuota/mes</th>
+                                                        <th className="text-center py-1 px-2 font-medium">Estado</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {(contratos ?? []).map(c => {
+                                                        const ma = (c.meses_activos || '').trim()
+                                                        const mesesLabel = ma
+                                                            ? ma.split(',').map((m: string) => MESES[parseInt(m.trim(), 10) - 1] ?? m.trim()).join(', ')
+                                                            : 'Todos'
+                                                        const activo = !c.desactivado && !c.fecha_baja
+                                                        return (
+                                                            <tr key={c.id} className={`border-b border-slate-50 ${activo ? '' : 'opacity-50'}`}>
+                                                                <td className="py-1 px-2 font-medium text-slate-700">{c.tipo_nombre}</td>
+                                                                <td className="py-1 px-2 text-slate-500 hidden sm:table-cell">{mesesLabel}</td>
+                                                                <td className="py-1 px-2 text-slate-400 hidden md:table-cell">{PERIOD_LABEL[c.periodicidad] ?? c.periodicidad}</td>
+                                                                <td className="text-right py-1 px-2 font-semibold text-indigo-600">{c.cuota_recibo.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
+                                                                <td className="text-center py-1 px-2">
+                                                                    {c.impago
+                                                                        ? <span className="inline-flex items-center gap-0.5 bg-red-100 text-red-700 rounded-full px-1.5 py-0.5 text-[10px]"><AlertTriangle size={10} />Impago</span>
+                                                                        : activo
+                                                                            ? <span className="inline-flex items-center gap-0.5 bg-emerald-100 text-emerald-700 rounded-full px-1.5 py-0.5 text-[10px]"><CheckCircle size={10} />Activo</span>
+                                                                            : <span className="inline-flex items-center gap-0.5 bg-slate-200 text-slate-500 rounded-full px-1.5 py-0.5 text-[10px]">Baja</span>
+                                                                    }
+                                                                </td>
+                                                            </tr>
+                                                        )
+                                                    })}
+                                                    {(contratos ?? []).length === 0 && !contratosLoading && (
+                                                        <tr><td colSpan={5} className="text-center py-4 text-slate-400">Sin contratos</td></tr>
+                                                    )}
+                                                </tbody>
+                                                <tfoot>
+                                                    {(contratos ?? []).filter(c => !c.desactivado && !c.fecha_baja).length > 0 && (
+                                                        <tr className="border-t-2 border-slate-200 font-bold text-indigo-700 bg-indigo-50">
+                                                            <td className="py-1 px-2" colSpan={3}>{(contratos ?? []).filter(c => !c.desactivado && !c.fecha_baja).length} activo{(contratos ?? []).filter(c => !c.desactivado && !c.fecha_baja).length !== 1 ? 's' : ''}</td>
+                                                            <td className="text-right py-1 px-2">{(contratos ?? []).filter(c => !c.desactivado && !c.fecha_baja).reduce((s, c) => s + (c.cuota_recibo ?? 0), 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
+                                                            <td />
+                                                        </tr>
+                                                    )}
+                                                </tfoot>
+                                            </table>
+                                    )}
                                 </div>
                             </div>
                         </div>
 
                         {/* ═══ RIGHT COLUMN: KPIs + Patrón + TOP ═══ */}
-                        <div className="col-span-6 flex flex-col gap-3 h-full min-h-0 overflow-hidden">
+                        <div className="md:col-span-6 flex flex-col gap-3 md:h-full md:min-h-0 md:overflow-hidden">
                             {/* KPI Row 1 */}
-                            <div className="grid grid-cols-4 gap-2 shrink-0">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
                                 <KpiCard label="Ticket Medio" icon="🎫" value={`${fmtInt(kpis.ticket_medio)} €`} />
                                 <KpiCard label="Ventas Año" icon="💰"
                                     value={`${fmt(kpis.ventas_anio)} €`}
@@ -338,7 +423,7 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
                             </div>
 
                             {/* KPI Row 2 */}
-                            <div className="grid grid-cols-4 gap-2 shrink-0">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
                                 <KpiCard label="Plazo Pago" icon="📦" value={`${kpis.plazo_pago} d`} />
                                 <KpiCard label="Frecuencia" icon="📊" value={`${kpis.frecuencia} días`} />
                                 <KpiCard label="Saldo Pendiente" icon="💳" value={`${fmt(kpis.saldo_pendiente)} €`}
@@ -353,20 +438,20 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
                             </div>
 
                             {/* Patrón Semanal */}
-                            <div className="border rounded-lg p-3 shrink-0">
-                                <p className="text-xs text-slate-500 font-medium mb-2">📊 Patrón Semanal (Días con pedidos L-D)</p>
-                                <div className="grid grid-cols-7 gap-1.5">
+                            <div className="border rounded-lg px-3 py-2 shrink-0">
+                                <p className="text-[10px] text-slate-500 font-medium mb-1.5">📊 Patrón Semanal (Días con pedidos L-D)</p>
+                                <div className="grid grid-cols-7 gap-1">
                                     {patron_semanal.map((cnt, i) => (
-                                        <div key={i} className={`rounded-lg p-2 text-center ${cnt > 0 ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-500'}`}>
-                                            <div className="text-[10px] font-medium mb-0.5">{DIAS[i]}</div>
-                                            <div className="text-lg font-bold">{cnt}</div>
+                                        <div key={i} className={`rounded py-1 text-center ${cnt > 0 ? 'bg-green-500 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                                            <div className="text-[9px] font-medium leading-none mb-0.5">{DIAS[i]}</div>
+                                            <div className="text-xs font-bold leading-none">{cnt}</div>
                                         </div>
                                     ))}
                                 </div>
                             </div>
 
                             {/* TOP Productos */}
-                            <div className="border rounded-lg flex-1 flex flex-col min-h-0">
+                            <div className="border rounded-lg flex flex-col min-h-[280px] md:flex-1 md:min-h-0">
                                 <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
                                     <h3 className="text-xs font-semibold text-slate-700">TOP Ventas por año</h3>
                                     <select value={topAnio} onChange={e => setTopAnio(Number(e.target.value))} className="border rounded px-2 py-0.5 text-xs">
@@ -430,7 +515,7 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
                                 {!docLoading && docDetalle && (
                                     <div className="space-y-4">
                                         {/* Cabecera */}
-                                        <div className="grid grid-cols-4 gap-3 text-xs">
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                                             <div><span className="text-slate-400">Tipo:</span> <span className="font-semibold">{docDetalle.cabecera.tipodoc === 8 ? 'Factura' : docDetalle.cabecera.tipodoc === 4 ? 'Albarán' : docDetalle.cabecera.tipodoc === 1 ? 'Presupuesto' : `Doc ${docDetalle.cabecera.tipodoc}`}</span></div>
                                             <div><span className="text-slate-400">Serie/Num:</span> <span className="font-semibold">{docDetalle.cabecera.serie}-{docDetalle.cabecera.numero}</span></div>
                                             <div><span className="text-slate-400">Fecha:</span> <span className="font-semibold">{docDetalle.cabecera.fecha}</span></div>
@@ -473,7 +558,7 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
                                         </table>
 
                                         {/* IVA + Vencimientos */}
-                                        <div className="grid grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <div className="bg-blue-50 rounded-lg p-3">
                                                 <h4 className="text-xs font-bold text-blue-700 mb-2">Desglose IVA</h4>
                                                 <div className="space-y-1 text-xs font-mono">

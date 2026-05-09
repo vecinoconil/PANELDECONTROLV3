@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, get_empresa_from_local
 from app.database import get_session
 from app.models.app_models import Empresa, Usuario
 from app.services.pg_connection import get_pg_connection
@@ -15,24 +15,16 @@ from app.services.pg_connection import get_pg_connection
 router = APIRouter()
 
 
-def _get_empresa(user: Usuario, session: Session) -> Empresa:
-    if not user.empresa_id:
-        raise HTTPException(status_code=400, detail="Usuario sin empresa asignada")
-    empresa = session.get(Empresa, user.empresa_id)
-    if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada")
-    return empresa
-
 
 # ── Filter options ────────────────────────────────────────────────────────────
 
 @router.get("/filtros-comparativa")
 def filtros_comparativa(
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
     """Return available filter options for comparativa report."""
-    empresa = _get_empresa(current_user, session)
     conn = None
     try:
         conn = get_pg_connection(empresa)
@@ -105,10 +97,10 @@ def comparativa_ventas_clientes(
     poblacion: Optional[str] = Query(default=None),
     cpostal: Optional[str] = Query(default=None),
     ocultar_obsoletos: bool = Query(default=False),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     today = date.today()
     if anio1 is None:
         anio1 = today.year - 1
@@ -298,11 +290,11 @@ def comparativa_cliente_detalle(
     anio1: int = Query(default=None),
     anio2: int = Query(default=None),
     meses: Optional[str] = Query(default=None),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
     """Desglose familia > subfamilia > artículo para un cliente."""
-    empresa = _get_empresa(current_user, session)
     today = date.today()
     if anio1 is None:
         anio1 = today.year - 1
@@ -475,10 +467,10 @@ def comparativa_ventas_agentes(
     poblacion: Optional[str] = Query(default=None),
     cpostal: Optional[str] = Query(default=None),
     ocultar_obsoletos: bool = Query(default=False),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     today = date.today()
     if anio1 is None:
         anio1 = today.year - 1
@@ -602,10 +594,10 @@ def comparativa_ventas_articulos(
     poblacion: Optional[str] = Query(default=None),
     cpostal: Optional[str] = Query(default=None),
     ocultar_obsoletos: bool = Query(default=False),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     today = date.today()
     if anio1 is None:
         anio1 = today.year - 1
@@ -736,10 +728,10 @@ def comparativa_ventas_familias(
     poblacion: Optional[str] = Query(default=None),
     cpostal: Optional[str] = Query(default=None),
     ocultar_obsoletos: bool = Query(default=False),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     today = date.today()
     if anio1 is None:
         anio1 = today.year - 1
@@ -855,10 +847,10 @@ def seguimiento_clientes(
     cpostal: Optional[str] = Query(default=None),
     ocultar_obsoletos: bool = Query(default=False),
     no_compra_meses: Optional[int] = Query(default=None),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     today = date.today()
     if anio1 is None:
         anio1 = today.year - 1
@@ -955,10 +947,10 @@ def seguimiento_clientes(
 
 @router.get("/condiciones-especiales")
 def condiciones_especiales(
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     conn = None
     try:
         conn = get_pg_connection(empresa)
@@ -1027,10 +1019,10 @@ def condiciones_especiales(
 def ficha_articulo(
     referencia: str = Query(...),
     anio: int = Query(default=None),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     today = date.today()
     if anio is None:
         anio = today.year

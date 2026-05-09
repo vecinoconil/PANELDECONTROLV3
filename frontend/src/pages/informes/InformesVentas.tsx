@@ -116,6 +116,9 @@ export default function InformesVentas() {
     const [loadKey, setLoadKey] = useState(0)
     const [params, setParams] = useState<Record<string, string>>({})
 
+    // Mobile drawer
+    const [filtersOpen, setFiltersOpen] = useState(false)
+
     // Load filter options
     useEffect(() => {
         api.get<Filtros>('/api/informes/filtros-comparativa').then(r => setFiltros(r.data))
@@ -165,23 +168,30 @@ export default function InformesVentas() {
                             <p className="text-[10px] text-slate-400">Comparativa y análisis comercial</p>
                         </div>
                     </div>
-                    <div className="flex items-center gap-3 bg-slate-50 rounded-lg px-3 py-1.5">
-                        <div className="flex items-center gap-1.5">
-                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                            <input type="number" value={anio1} onChange={e => setAnio1(+e.target.value)}
-                                className="w-16 text-xs font-medium text-center border border-slate-200 rounded-md py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                            <span className="text-slate-300">vs</span>
-                            <input type="number" value={anio2} onChange={e => setAnio2(+e.target.value)}
-                                className="w-16 text-xs font-medium text-center border border-slate-200 rounded-md py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setFiltersOpen(true)}
+                                className="md:hidden flex items-center gap-1.5 bg-blue-600 text-white rounded-lg px-2.5 py-1.5 text-xs font-medium shadow-sm">
+                                <SlidersHorizontal className="w-3.5 h-3.5" />
+                                Filtros
+                            </button>
+                        <div className="flex items-center gap-2 bg-slate-50 rounded-lg px-2.5 py-1.5">
+                            <div className="flex items-center gap-1.5">
+                                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                                <input type="number" value={anio1} onChange={e => setAnio1(+e.target.value)}
+                                    className="w-14 text-xs font-medium text-center border border-slate-200 rounded-md py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                                <span className="text-slate-300">vs</span>
+                                <input type="number" value={anio2} onChange={e => setAnio2(+e.target.value)}
+                                    className="w-14 text-xs font-medium text-center border border-slate-200 rounded-md py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                            </div>
                         </div>
                     </div>
                 </div>
                 {/* Tabs */}
-                <div className="px-5 flex items-center justify-center gap-0.5 border-b border-slate-200">
-                    <div className="flex items-center gap-0.5 bg-blue-50 rounded-t-lg px-1 pt-0.5">
+                <div className="px-2 md:px-5 overflow-x-auto border-b border-slate-200">
+                    <div className="flex items-center gap-0.5 bg-blue-50 rounded-t-lg px-1 pt-0.5 min-w-max">
                         {TABS.map(t => (
                             <button key={t.key} onClick={() => setTab(t.key)}
-                                className={`px-3.5 py-2 text-xs font-medium transition-all rounded-t-md
+                                className={`px-2 md:px-3.5 py-2 text-xs font-medium transition-all rounded-t-md whitespace-nowrap
                                     ${tab === t.key
                                         ? 'bg-white text-blue-700 shadow-sm border border-b-0 border-slate-200'
                                         : 'text-slate-500 hover:text-blue-600 hover:bg-blue-100/50'}`}>
@@ -193,9 +203,118 @@ export default function InformesVentas() {
             </div>
 
             <div className="flex flex-1 overflow-hidden">
+                {/* ── Mobile filter drawer ── */}
+                {filtersOpen && (
+                    <div className="fixed inset-0 z-50 md:hidden">
+                        <div className="absolute inset-0 bg-black/50" onClick={() => setFiltersOpen(false)} />
+                        <div className="absolute left-0 top-0 bottom-0 w-72 max-w-[85vw] bg-slate-100 overflow-y-auto shadow-2xl flex flex-col"
+                            onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center justify-between px-3 pt-4 pb-2 border-b border-slate-300 flex-shrink-0">
+                                <div className="flex items-center gap-1.5">
+                                    <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500" />
+                                    <span className="font-bold text-sm text-slate-700">Filtros</span>
+                                </div>
+                                <button onClick={() => setFiltersOpen(false)} className="p-1 rounded-md hover:bg-slate-200 text-slate-500">
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
+                            <div className="p-3 space-y-2 text-[11px] flex-1 overflow-y-auto">
+                                <div className="flex items-center gap-1.5 text-slate-500 mb-1">
+                                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                                    <span className="font-semibold text-xs uppercase tracking-wider">Artículos</span>
+                                </div>
+                                <div className="space-y-2 bg-blue-100/70 rounded-lg p-2.5 border border-blue-200">
+                                    <div>
+                                        <label className="text-slate-400 text-[10px] font-medium uppercase tracking-wide block mb-0.5">Familia</label>
+                                        <Sel value={familia} placeholder="Todas"
+                                            onChange={v => { setFamilia(v ? +v : ''); setSubfamilia('') }}
+                                            options={(filtros?.familias ?? []).map(f => ({ v: f.codigo, l: f.nombre }))} />
+                                    </div>
+                                    <div>
+                                        <label className="text-slate-400 text-[10px] font-medium uppercase tracking-wide block mb-0.5">SubFamilia</label>
+                                        <Sel value={subfamilia} placeholder="Todas"
+                                            onChange={v => setSubfamilia(v ? +v : '')}
+                                            options={subfamiliasFiltradas.map(f => ({ v: f.codigo, l: f.nombre }))} />
+                                    </div>
+                                    <div>
+                                        <label className="text-slate-400 text-[10px] font-medium uppercase tracking-wide block mb-0.5">Artículo</label>
+                                        <input value={articulo} onChange={e => setArticulo(e.target.value)}
+                                            className="input !py-1 text-[11px] w-full" placeholder="Referencia" />
+                                    </div>
+                                    <div>
+                                        <label className="text-slate-400 text-[10px] font-medium uppercase tracking-wide block mb-0.5">Marca</label>
+                                        <Sel value={marca} placeholder="Todas"
+                                            onChange={v => setMarca(v ? +v : '')}
+                                            options={(filtros?.marcas ?? []).map(m => ({ v: m.codigo, l: m.nombre }))} />
+                                    </div>
+                                    <div>
+                                        <label className="text-slate-400 text-[10px] font-medium uppercase tracking-wide block mb-0.5">Tipo Artículo</label>
+                                        <Sel value={tipoArticulo} placeholder="Todos"
+                                            onChange={v => setTipoArticulo(v ? +v : '')}
+                                            options={(filtros?.tipos_articulo ?? []).map(t => ({ v: t.codigo, l: t.nombre }))} />
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 text-slate-500 mt-3 mb-1">
+                                    <Users className="w-3.5 h-3.5" />
+                                    <span className="font-semibold text-xs uppercase tracking-wider">Clientes</span>
+                                </div>
+                                <div className="space-y-2 bg-emerald-100/70 rounded-lg p-2.5 border border-emerald-200">
+                                    <div>
+                                        <label className="text-slate-400 text-[10px] font-medium uppercase tracking-wide block mb-0.5">Tipo Cliente</label>
+                                        <Sel value={tipoCliente} placeholder="Todos"
+                                            onChange={v => setTipoCliente(v ? +v : '')}
+                                            options={(filtros?.tipos_cliente ?? []).map(t => ({ v: t.codigo, l: t.nombre }))} />
+                                    </div>
+                                    <div>
+                                        <label className="text-slate-400 text-[10px] font-medium uppercase tracking-wide block mb-0.5">Código Postal</label>
+                                        <Sel value={cpostal} placeholder="Todos"
+                                            onChange={v => setCpostal(v)}
+                                            options={(filtros?.codigos_postales ?? []).map(c => ({ v: c, l: c }))} />
+                                    </div>
+                                    <div>
+                                        <label className="text-slate-400 text-[10px] font-medium uppercase tracking-wide block mb-0.5">Población</label>
+                                        <Sel value={poblacion} placeholder="Todas"
+                                            onChange={v => setPoblacion(v)}
+                                            options={(filtros?.poblaciones ?? []).map(p => ({ v: p, l: p }))} />
+                                    </div>
+                                    <div>
+                                        <label className="text-slate-400 text-[10px] font-medium uppercase tracking-wide block mb-0.5">Agente</label>
+                                        <Sel value={agente} placeholder="Todos"
+                                            onChange={v => setAgente(v ? +v : '')}
+                                            options={(filtros?.agentes ?? []).map(a => ({ v: a.codigo, l: a.nombre }))} />
+                                    </div>
+                                    <label className="flex items-center gap-1.5 cursor-pointer mt-1">
+                                        <input type="checkbox" checked={ocultarObsoletos}
+                                            onChange={e => setOcultarObsoletos(e.target.checked)} className="accent-blue-600 rounded" />
+                                        <span className="text-slate-500">Ocultar Obsoletos</span>
+                                    </label>
+                                </div>
+                                <div className="flex items-center gap-1.5 text-slate-500 mt-3 mb-1">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    <span className="font-semibold text-xs uppercase tracking-wider">Meses</span>
+                                </div>
+                                <div className="grid grid-cols-4 gap-1">
+                                    {MESES.map(m => (
+                                        <button key={m.v} onClick={() => toggleMes(m.v)}
+                                            className={`py-1 rounded-md text-[10px] font-medium transition-all border
+                                                ${mesesSel.includes(m.v)
+                                                    ? 'bg-blue-600 text-white shadow-sm border-blue-600'
+                                                    : 'bg-white text-slate-500 border-slate-200/70 hover:border-blue-300 hover:text-slate-700'}`}>
+                                            {m.l}
+                                        </button>
+                                    ))}
+                                </div>
+                                {mesesSel.length > 0 && (
+                                    <button onClick={() => setMesesSel([])}
+                                        className="text-[10px] text-blue-600 hover:underline w-full text-center mt-1">Limpiar selección</button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* ── Left sidebar: Filters ── */}
-                {tab !== 'condiciones' && (
-                    <div className="w-64 flex-shrink-0 bg-slate-200 border-r border-slate-300 overflow-y-auto p-3 space-y-2 text-[11px]">
+                <div className="hidden md:block w-64 flex-shrink-0 bg-slate-200 border-r border-slate-300 overflow-y-auto p-3 space-y-2 text-[11px]">
                         {/* Filtros Artículos */}
                         <div className="flex items-center gap-1.5 text-slate-500 mb-1">
                             <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -291,7 +410,6 @@ export default function InformesVentas() {
                                 className="text-[10px] text-blue-600 hover:underline w-full text-center mt-1">Limpiar selección</button>
                         )}
                     </div>
-                )}
 
                 {/* ── Tab content ── */}
                 <div className="flex-1 overflow-hidden flex flex-col bg-white">
@@ -460,7 +578,7 @@ function TabClientes({ visible, params, loadKey, anio1, anio2, busqueda, setBusq
             <div className="flex flex-1 overflow-hidden">
                 <div className="flex-1 overflow-auto">
                     {!loaded && !loading ? <EmptyState /> : loading ? <LoadingState /> : (
-                        <div className="text-xs">
+                        <div className="text-xs min-w-[480px]">
                             {filtered.map(c => {
                                 const isOpen = expandedCli.has(c.cli_codigo)
                                 const col = c.ventas_anio1 > 0 && c.ventas_anio2 === 0 ? 'text-red-500'
@@ -553,7 +671,7 @@ function TabClientes({ visible, params, loadKey, anio1, anio2, busqueda, setBusq
 
                 {/* Summary panel */}
                 {loaded && resumen && (
-                    <div className="w-52 flex-shrink-0 bg-white border-l border-slate-100 overflow-y-auto p-3 space-y-3 text-[11px]">
+                    <div className="hidden md:flex flex-col w-52 flex-shrink-0 bg-white border-l border-slate-100 overflow-y-auto p-3 space-y-3 text-[11px]">
                         <div className="bg-gradient-to-br from-blue-50 to-blue-100/50 rounded-lg p-3 text-center">
                             <div className="flex items-center justify-center gap-1 text-blue-600 font-bold text-[10px] uppercase tracking-wider mb-1">
                                 <Users className="w-3.5 h-3.5" /> Total Clientes
@@ -647,7 +765,7 @@ function TabAgentes({ visible, params, loadKey, anio1, anio2, busqueda, setBusqu
             <SearchBar busqueda={busqueda} setBusqueda={setBusqueda} count={filtered.length} placeholder="Buscar agente o cliente..." />
             <div className="flex-1 overflow-auto">
                 {!loaded && !loading ? <EmptyState /> : loading ? <LoadingState /> : (
-                    <div className="text-xs">
+                    <div className="text-xs min-w-[580px]">
                         {filtered.map(ag => {
                             const isOpen = expanded.has(ag.agente_codigo)
                             const col = colorVar(ag.ventas_anio1, ag.ventas_anio2)
@@ -770,7 +888,7 @@ function TabArticulos({ visible, params, loadKey, anio1, anio2, busqueda, setBus
             <SearchBar busqueda={busqueda} setBusqueda={setBusqueda} count={filtered.length} placeholder="Buscar artículo..." />
             <div className="flex-1 overflow-auto">
                 {!loaded && !loading ? <EmptyState /> : loading ? <LoadingState /> : (
-                    <div className="text-xs">
+                    <div className="text-xs min-w-[580px]">
                         {/* Header */}
                         <div className="grid grid-cols-[1fr_100px_100px_70px_70px_70px] gap-1 px-3 py-2.5 font-semibold text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200 bg-slate-50/90 backdrop-blur-sm sticky top-0 z-10">
 
@@ -909,7 +1027,7 @@ function TabFamilias({ visible, params, loadKey, anio1, anio2, busqueda, setBusq
             <SearchBar busqueda={busqueda} setBusqueda={setBusqueda} count={famCount} placeholder="Buscar familia o artículo..." />
             <div className="flex-1 overflow-auto">
                 {!loaded && !loading ? <EmptyState /> : loading ? <LoadingState /> : (
-                    <div className="text-xs">
+                    <div className="text-xs min-w-[560px]">
                         {/* Header */}
                         <div className="grid grid-cols-[1fr_110px_110px_80px_80px] gap-1 px-3 py-2.5 font-semibold text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200 bg-slate-50/90 backdrop-blur-sm sticky top-0 z-10">
                             <div>Familia / Artículo / Cliente</div>
@@ -1010,14 +1128,14 @@ function TabSeguimiento({ visible, params, loadKey, anio1, anio2, busqueda, setB
 
     return (
         <>
-            <div className="px-4 py-2 bg-white border-b border-slate-100 flex items-center gap-4">
-                <div className="flex items-center gap-2 flex-1 bg-slate-50 rounded-md px-2.5 py-1.5">
+            <div className="px-4 py-2 bg-white border-b border-slate-100 flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 flex-1 min-w-[140px] bg-slate-50 rounded-md px-2.5 py-1.5">
                     <Search className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                     <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
                         className="flex-1 text-xs bg-transparent outline-none placeholder:text-slate-300" placeholder="Buscar cliente..." />
                 </div>
-                <div className="flex items-center gap-2 ml-auto">
-                    <span className="text-[11px] text-slate-500">Clientes que NO compran desde hace</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] text-slate-500 hidden md:inline">Sin compras desde hace</span>
                     <select value={noCompraMeses} onChange={e => setNoCompraMeses(e.target.value)}
                         className="input !py-1 text-[11px]">
                         <option value="">Todos</option>
@@ -1025,12 +1143,12 @@ function TabSeguimiento({ visible, params, loadKey, anio1, anio2, busqueda, setB
                         <option value="3">3 meses</option><option value="6">6 meses</option>
                         <option value="12">12 meses</option><option value="24">24 meses</option>
                     </select>
-                    <span className="text-[10px] text-slate-400 tabular-nums font-medium bg-slate-100 px-2 py-0.5 rounded-full">{filtered.length} clientes</span>
+                    <span className="text-[10px] text-slate-400 tabular-nums font-medium bg-slate-100 px-2 py-0.5 rounded-full">{filtered.length}</span>
                 </div>
             </div>
             <div className="flex-1 overflow-auto">
                 {!loaded && !loading ? <EmptyState /> : loading ? <LoadingState /> : (
-                    <div className="text-xs">
+                    <div className="text-xs min-w-[640px]">
                         {filtered.map(c => {
                             const isOpen = expanded.has(c.cli_codigo)
                             const diff = c.ventas_anio2 - c.ventas_anio1

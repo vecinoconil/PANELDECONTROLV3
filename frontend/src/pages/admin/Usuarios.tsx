@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { Users, Plus, Pencil, Trash2, Power, Eye, EyeOff, Mail } from 'lucide-react'
-import { PERMISOS_DISPONIBLES, type PermisosMap } from '../../types'
+import { Users, Plus, Pencil, Trash2, Power, Eye, EyeOff, Mail, Settings } from 'lucide-react'
+import { PERMISOS_DISPONIBLES, hasPermiso, type PermisosMap } from '../../types'
+import { useAuth } from '../../auth/AuthContext'
 
 interface Empresa { id: number; nombre: string }
 interface LocalItem { id: number; nombre: string; empresa_id: number }
 interface AgenteOption { codigo: number; nombre: string }
 interface SerieOption { serie: string }
+interface CajaOption { codigo: number; nombre: string }
+interface AlmacenOption { codigo: number; nombre: string }
 interface FpagoOption { codigo: number; nombre: string }
 interface Usuario {
     id: number
@@ -22,7 +25,13 @@ interface Usuario {
     agente_autoventa: number | null
     serie_autoventa: string | null
     autoventa_modifica_precio: boolean
-    fpagos_autoventa: number[]
+    tipodocs_autoventa: number[]
+    caja_autoventa: number | null
+    almacen_autoventa: number | null
+    fpago_autoventa: number | null
+    solo_clientes_agente: boolean
+    serie_expediciones: string[]
+    caja_reparto: number | null
 }
 interface UsuarioForm {
     empresa_id: number | null
@@ -35,14 +44,21 @@ interface UsuarioForm {
     agente_autoventa: number | null
     serie_autoventa: string | null
     autoventa_modifica_precio: boolean
-    fpagos_autoventa: number[]
+    tipodocs_autoventa: number[]
+    caja_autoventa: number | null
+    almacen_autoventa: number | null
+    fpago_autoventa: number | null
+    solo_clientes_agente: boolean
+    serie_expediciones: string[]
+    caja_reparto: number | null
 }
 
 const ROLES = ['superadmin', 'gerente', 'encargado', 'usuario']
 const emptyForm: UsuarioForm = {
     empresa_id: null, email: '', nombre: '', password: '', rol: 'usuario',
     local_ids: [], permisos: {},
-    agente_autoventa: null, serie_autoventa: null, autoventa_modifica_precio: false, fpagos_autoventa: [],
+    agente_autoventa: null, serie_autoventa: null, autoventa_modifica_precio: false, tipodocs_autoventa: [], caja_autoventa: null, almacen_autoventa: null, fpago_autoventa: null, solo_clientes_agente: false,
+    serie_expediciones: [], caja_reparto: null,
 }
 
 export default function Usuarios() {
@@ -58,8 +74,15 @@ export default function Usuarios() {
     const [sendingEmail, setSendingEmail] = useState<number | null>(null)
     const [agentesOptions, setAgentesOptions] = useState<AgenteOption[]>([])
     const [seriesOptions, setSeriesOptions] = useState<SerieOption[]>([])
+    const [cajasOptions, setCajasOptions] = useState<CajaOption[]>([])
+    const [almacenesOptions, setAlmacenesOptions] = useState<AlmacenOption[]>([])
     const [fpagosOptions, setFpagosOptions] = useState<FpagoOption[]>([])
     const [loadingPgData, setLoadingPgData] = useState(false)
+    const [configModal, setConfigModal] = useState<'autoventa' | 'expediciones' | 'reparto' | null>(null)
+    const [configFromCheck, setConfigFromCheck] = useState(false)
+    const [subError, setSubError] = useState('')
+
+    const { user: currentUser } = useAuth()
 
     const fetch = async () => {
         setLoading(true)
@@ -78,25 +101,38 @@ export default function Usuarios() {
 
     useEffect(() => { fetch() }, [])
 
-    // Load agentes, series y formaspago when autoventa is selected and empresa is set
+    // Load agentes, series y formaspago when autoventa OR expediciones is selected and empresa is set
+    const needsPgData = (form.permisos.autoventa?.ver || form.permisos.autoventa?.entrar ||
+                         form.permisos.expediciones?.ver || form.permisos.expediciones?.entrar ||
+                         form.permisos.reparto?.ver || form.permisos.reparto?.entrar)
     useEffect(() => {
-        if (showModal && (form.permisos.autoventa?.ver || form.permisos.autoventa?.entrar) && form.empresa_id) {
+        if (showModal && (needsPgData || !!configModal) && form.empresa_id) {
             setLoadingPgData(true)
             Promise.all([
                 api.get<AgenteOption[]>(`/api/admin/pg-data/agentes?empresa_id=${form.empresa_id}`),
                 api.get<SerieOption[]>(`/api/admin/pg-data/series?empresa_id=${form.empresa_id}`),
+                api.get<CajaOption[]>(`/api/admin/pg-data/cajas?empresa_id=${form.empresa_id}`),
+                api.get<AlmacenOption[]>(`/api/admin/pg-data/almacenes?empresa_id=${form.empresa_id}`),
                 api.get<FpagoOption[]>(`/api/admin/pg-data/formaspago?empresa_id=${form.empresa_id}`),
             ])
-                .then(([a, s, f]) => { setAgentesOptions(a.data); setSeriesOptions(s.data); setFpagosOptions(f.data) })
-                .catch(() => { setAgentesOptions([]); setSeriesOptions([]); setFpagosOptions([]) })
+                .then(([a, s, c, alm, fp]) => { setAgentesOptions(a.data); setSeriesOptions(s.data); setCajasOptions(c.data); setAlmacenesOptions(alm.data); setFpagosOptions(fp.data) })
+                .catch(() => { setAgentesOptions([]); setSeriesOptions([]); setCajasOptions([]); setAlmacenesOptions([]); setFpagosOptions([]) })
                 .finally(() => setLoadingPgData(false))
         }
-    }, [showModal, form.permisos, form.empresa_id])
+    }, [showModal, form.permisos, form.empresa_id, configModal])
 
     const empresaName = (id: number | null) => id ? empresas.find(e => e.id === id)?.nombre || '—' : '—'
     const localesForEmpresa = form.empresa_id ? locales.filter(l => l.empresa_id === form.empresa_id) : locales
 
-    const openNew = () => { setEditId(null); setForm(emptyForm); setShowModal(true); setError('') }
+    const openNew = () => {
+        setEditId(null)
+        setForm({
+            ...emptyForm,
+            empresa_id: currentUser?.rol === 'gerente' ? (currentUser.empresa_id ?? null) : null,
+        })
+        setShowModal(true)
+        setError('')
+    }
     const openEdit = (u: Usuario) => {
         setEditId(u.id)
         setForm({
@@ -105,7 +141,13 @@ export default function Usuarios() {
             agente_autoventa: u.agente_autoventa ?? null,
             serie_autoventa: u.serie_autoventa ?? null,
             autoventa_modifica_precio: u.autoventa_modifica_precio ?? false,
-            fpagos_autoventa: u.fpagos_autoventa ?? [],
+            tipodocs_autoventa: u.tipodocs_autoventa ?? [],
+            caja_autoventa: u.caja_autoventa ?? null,
+            almacen_autoventa: u.almacen_autoventa ?? null,
+            fpago_autoventa: u.fpago_autoventa ?? null,
+            solo_clientes_agente: u.solo_clientes_agente ?? false,
+            serie_expediciones: u.serie_expediciones ?? [],
+            caja_reparto: u.caja_reparto ?? null,
         })
         setShowModal(true)
         setError('')
@@ -133,7 +175,59 @@ export default function Usuarios() {
         }))
     }
 
+    const handleEntrarCheck = (key: string, value: boolean) => {
+        setPermisoFlag(key, 'entrar', value)
+        if (value && (key === 'autoventa' || key === 'expediciones' || key === 'reparto')) {
+            setSubError('')
+            setConfigFromCheck(true)
+            setConfigModal(key as 'autoventa' | 'expediciones' | 'reparto')
+        }
+    }
+
+    const openConfig = (type: 'autoventa' | 'expediciones' | 'reparto') => {
+        setSubError('')
+        setConfigFromCheck(false)
+        setConfigModal(type)
+    }
+
+    const closeConfigModal = (applied: boolean) => {
+        if (!applied && configFromCheck) {
+            if (configModal === 'autoventa') setPermisoFlag('autoventa', 'entrar', false)
+            if (configModal === 'expediciones') setPermisoFlag('expediciones', 'entrar', false)
+            if (configModal === 'reparto') setPermisoFlag('reparto', 'entrar', false)
+        }
+        setConfigModal(null)
+        setConfigFromCheck(false)
+        setSubError('')
+    }
+
+    const applyAutoventa = () => {
+        if (!form.agente_autoventa) { setSubError('Selecciona un agente'); return }
+        closeConfigModal(true)
+    }
+
+    const applyExpediciones = () => {
+        if (form.serie_expediciones.length === 0) { setSubError('Selecciona al menos una serie'); return }
+        closeConfigModal(true)
+    }
+
+    const applyReparto = () => {
+        closeConfigModal(true)
+    }
+
     const showPermisos = form.rol === 'gerente' || form.rol === 'encargado' || form.rol === 'usuario'
+
+    // Roles que el usuario actual puede asignar
+    const availableRoles = currentUser?.rol === 'superadmin'
+        ? ['superadmin', 'gerente', 'encargado', 'usuario']
+        : ['encargado', 'usuario']
+
+    // Permisos que el usuario actual puede asignar (solo los que él mismo tiene)
+    const assignablePermisos = PERMISOS_DISPONIBLES.filter(p => {
+        if (!currentUser) return false
+        if (currentUser.rol === 'superadmin') return true
+        return hasPermiso(currentUser.permisos, p.key, 'entrar')
+    })
 
     const togglePasswordVisible = (id: number) => {
         setVisiblePasswords(prev => {
@@ -300,17 +394,24 @@ export default function Usuarios() {
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Rol</label>
                                     <select className="input" value={form.rol} onChange={e => setForm({ ...form, rol: e.target.value })}>
-                                        {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                                        {availableRoles.map(r => <option key={r} value={r}>{r}</option>)}
                                     </select>
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
-                                <select className="input" value={form.empresa_id || ''} onChange={e => setForm({ ...form, empresa_id: e.target.value ? +e.target.value : null, local_ids: [] })}>
-                                    <option value="">Sin empresa</option>
-                                    {empresas.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-                                </select>
-                            </div>
+                            {currentUser?.rol === 'superadmin' ? (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
+                                    <select className="input" value={form.empresa_id || ''} onChange={e => setForm({ ...form, empresa_id: e.target.value ? +e.target.value : null, local_ids: [] })}>
+                                        <option value="">Sin empresa</option>
+                                        {empresas.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+                                    </select>
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
+                                    <p className="input bg-slate-50 text-slate-500 cursor-default">{empresas.find(e => e.id === form.empresa_id)?.nombre || '—'}</p>
+                                </div>
+                            )}
                             {localesForEmpresa.length > 0 && (
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Locales asignados</label>
@@ -328,7 +429,7 @@ export default function Usuarios() {
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Permisos de acceso</label>
                                     <div className="flex flex-wrap gap-2">
-                                        {PERMISOS_DISPONIBLES.map(p => (
+                                        {assignablePermisos.map(p => (
                                             <div key={p.key} className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-slate-200 text-xs">
                                                 <span className="text-slate-700 min-w-[120px]">{p.label}</span>
                                                 <label className="inline-flex items-center gap-1 text-slate-600">
@@ -343,90 +444,59 @@ export default function Usuarios() {
                                                     <input
                                                         type="checkbox"
                                                         checked={!!form.permisos[p.key]?.entrar}
-                                                        onChange={e => setPermisoFlag(p.key, 'entrar', e.target.checked)}
+                                                        onChange={e => handleEntrarCheck(p.key, e.target.checked)}
                                                     />
                                                     Entrar
                                                 </label>
+                                                {(p.key === 'autoventa' || p.key === 'expediciones' || p.key === 'reparto') && !!form.permisos[p.key]?.entrar && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openConfig(p.key as 'autoventa' | 'expediciones' | 'reparto')}
+                                                        className="p-0.5 rounded hover:bg-slate-200 text-slate-500"
+                                                        title={`Configurar ${p.label}`}
+                                                    >
+                                                        <Settings className="w-3.5 h-3.5" />
+                                                    </button>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
-                                    <p className="text-xs text-slate-400 mt-1">Superadmin y Gerente tienen acceso total automáticamente.</p>
+                                    <p className="text-xs text-slate-400 mt-1">Superadmin tiene acceso total automáticamente.</p>
                                 </div>
                             )}
-                            {/* Autoventa config */}
-                            {((form.permisos.autoventa?.ver || form.permisos.autoventa?.entrar) || form.rol === 'superadmin' || form.rol === 'gerente') && (
-                                <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-3">
-                                    <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Configuración Autoventa</p>
-                                    {!form.empresa_id ? (
-                                        <p className="text-xs text-amber-600">Asigna una empresa al usuario para cargar agentes y series.</p>
-                                    ) : loadingPgData ? (
-                                        <p className="text-xs text-slate-400">Cargando agentes y series...</p>
-                                    ) : agentesOptions.length === 0 ? (
-                                        <p className="text-xs text-red-600">No hay agentes activos. Crea un agente en el ERP antes de configurar Autoventa.</p>
-                                    ) : (
-                                        <>
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <div>
-                                                    <label className="block text-xs font-medium text-slate-700 mb-1">Agente</label>
-                                                    <select
-                                                        className="input text-sm"
-                                                        value={form.agente_autoventa ?? ''}
-                                                        onChange={e => setForm({ ...form, agente_autoventa: e.target.value ? +e.target.value : null })}
-                                                    >
-                                                        <option value="">— Sin agente —</option>
-                                                        {agentesOptions.map(a => (
-                                                            <option key={a.codigo} value={a.codigo}>{a.nombre}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                                <div>
-                                                    <label className="block text-xs font-medium text-slate-700 mb-1">Serie predeterminada</label>
-                                                    <select
-                                                        className="input text-sm"
-                                                        value={form.serie_autoventa ?? ''}
-                                                        onChange={e => setForm({ ...form, serie_autoventa: e.target.value || null })}
-                                                    >
-                                                        <option value="">— Sin serie —</option>
-                                                        {seriesOptions.map(s => (
-                                                            <option key={s.serie} value={s.serie}>{s.serie}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            </div>
-                                            <label className="flex items-center gap-2 cursor-pointer select-none">
-                                                <input
-                                                    type="checkbox"
-                                                    className="w-4 h-4 accent-brand"
-                                                    checked={form.autoventa_modifica_precio}
-                                                    onChange={e => setForm({ ...form, autoventa_modifica_precio: e.target.checked })}
-                                                />
-                                                <span className="text-xs text-slate-700">Puede modificar precios en Autoventa</span>
-                                            </label>
-                                            {fpagosOptions.length > 0 && (
-                                                <div>
-                                                    <p className="text-xs font-medium text-slate-700 mb-1">Formas de pago permitidas</p>
-                                                    <div className="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto border border-amber-200 rounded p-2 bg-white">
-                                                        {fpagosOptions.map(fp => (
-                                                            <label key={fp.codigo} className="flex items-center gap-1 cursor-pointer select-none">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    className="w-3.5 h-3.5 accent-brand"
-                                                                    checked={form.fpagos_autoventa.includes(fp.codigo)}
-                                                                    onChange={e => {
-                                                                        const next = e.target.checked
-                                                                            ? [...form.fpagos_autoventa, fp.codigo]
-                                                                            : form.fpagos_autoventa.filter(c => c !== fp.codigo)
-                                                                        setForm({ ...form, fpagos_autoventa: next })
-                                                                    }}
-                                                                />
-                                                                <span className="text-xs text-slate-600 leading-tight">{fp.nombre}</span>
-                                                            </label>
-                                                        ))}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </>
-                                    )}
+                            {/* Config buttons para superadmin/gerente (sin grid de permisos) */}
+                            {!showPermisos && (
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">Configuraciones especiales</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => openConfig('autoventa')}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 text-xs hover:bg-amber-100"
+                                        >
+                                            <Settings className="w-3.5 h-3.5" />
+                                            Autoventa
+                                            {form.agente_autoventa ? <span className="bg-amber-200 text-amber-800 rounded px-1 font-semibold">✓</span> : <span className="text-amber-400">— sin config —</span>}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => openConfig('expediciones')}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs hover:bg-blue-100"
+                                        >
+                                            <Settings className="w-3.5 h-3.5" />
+                                            Expediciones
+                                            {form.serie_expediciones.length > 0 ? <span className="bg-blue-200 text-blue-800 rounded px-1 font-semibold">✓ {form.serie_expediciones.join(', ')}</span> : <span className="text-blue-400">— sin serie —</span>}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => openConfig('reparto')}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-green-200 bg-green-50 text-green-700 text-xs hover:bg-green-100"
+                                        >
+                                            <Settings className="w-3.5 h-3.5" />
+                                            Reparto
+                                            {form.caja_reparto ? <span className="bg-green-200 text-green-800 rounded px-1 font-semibold">✓ caja {form.caja_reparto}</span> : <span className="text-green-400">— sin caja —</span>}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -435,6 +505,254 @@ export default function Usuarios() {
                             <button onClick={() => setShowModal(false)} className="btn-ghost">Cancelar</button>
                             <button onClick={save} className="btn-primary">Guardar</button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Sub-modal de configuración (z-[60] sobre el modal principal) */}
+            {configModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]" onClick={() => closeConfigModal(false)}>
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+
+                        {/* ── Autoventa ── */}
+                        {configModal === 'autoventa' && (
+                            <>
+                                <h3 className="text-base font-bold mb-4 flex items-center gap-2">
+                                    <Settings className="w-4 h-4 text-amber-600" />
+                                    Configuración Autoventa
+                                </h3>
+                                {!form.empresa_id ? (
+                                    <p className="text-sm text-amber-600 mb-4">Asigna una empresa al usuario antes de configurar Autoventa.</p>
+                                ) : loadingPgData ? (
+                                    <p className="text-sm text-slate-400 mb-4">Cargando datos...</p>
+                                ) : agentesOptions.length === 0 ? (
+                                    <p className="text-sm text-red-600 mb-4">No hay agentes activos en el ERP para esta empresa.</p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-700 mb-1">Agente <span className="text-red-500">*</span></label>
+                                                <select
+                                                    className="input text-sm"
+                                                    value={form.agente_autoventa ?? ''}
+                                                    onChange={e => setForm(f => ({ ...f, agente_autoventa: e.target.value ? +e.target.value : null }))}
+                                                >
+                                                    <option value="">— Sin agente —</option>
+                                                    {agentesOptions.map(a => (
+                                                        <option key={a.codigo} value={a.codigo}>{a.nombre}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-700 mb-1">Serie predeterminada</label>
+                                                <select
+                                                    className="input text-sm"
+                                                    value={form.serie_autoventa ?? ''}
+                                                    onChange={e => setForm(f => ({ ...f, serie_autoventa: e.target.value || null }))}
+                                                >
+                                                    <option value="">— Sin serie —</option>
+                                                    {seriesOptions.map(s => (
+                                                        <option key={s.serie} value={s.serie}>{s.serie}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                                            <input
+                                                type="checkbox"
+                                                className="w-4 h-4 accent-brand"
+                                                checked={form.autoventa_modifica_precio}
+                                                onChange={e => setForm(f => ({ ...f, autoventa_modifica_precio: e.target.checked }))}
+                                            />
+                                            <span className="text-xs text-slate-700">Puede modificar precios en Autoventa</span>
+                                        </label>
+                                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                                            <input
+                                                type="checkbox"
+                                                className="w-4 h-4 accent-brand"
+                                                checked={form.solo_clientes_agente}
+                                                onChange={e => setForm(f => ({ ...f, solo_clientes_agente: e.target.checked }))}
+                                            />
+                                            <span className="text-xs text-slate-700">Ver solo sus clientes (filtrar por agente)</span>
+                                        </label>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-700 mb-1">Caja de cobros (efectivo)</label>
+                                            <select
+                                                className="input text-sm"
+                                                value={form.caja_autoventa ?? ''}
+                                                onChange={e => setForm(f => ({ ...f, caja_autoventa: e.target.value ? +e.target.value : null }))}
+                                            >
+                                                <option value="">— Sin caja —</option>
+                                                {cajasOptions.map(c => (
+                                                    <option key={c.codigo} value={c.codigo}>{c.nombre}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-700 mb-1">Forma de pago en cobros</label>
+                                            <select
+                                                className="input text-sm"
+                                                value={form.fpago_autoventa ?? ''}
+                                                onChange={e => setForm(f => ({ ...f, fpago_autoventa: e.target.value ? +e.target.value : null }))}
+                                            >
+                                                <option value="">— Sin forma de pago —</option>
+                                                {fpagosOptions.map(fp => (
+                                                    <option key={fp.codigo} value={fp.codigo}>{fp.nombre}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-700 mb-1">Almacén por defecto</label>
+                                            <select
+                                                className="input text-sm"
+                                                value={form.almacen_autoventa ?? ''}
+                                                onChange={e => setForm(f => ({ ...f, almacen_autoventa: e.target.value ? +e.target.value : null }))}
+                                            >
+                                                <option value="">— Almacén 1 (por defecto) —</option>
+                                                {almacenesOptions.map(a => (
+                                                    <option key={a.codigo} value={a.codigo}>{a.codigo} — {a.nombre}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs font-medium text-slate-700 mb-1">Tipos de documento permitidos</p>
+                                            <div className="flex gap-3">
+                                                {[{id: 2, label: 'Pedido'}, {id: 4, label: 'Albarán'}, {id: 8, label: 'Factura'}].map(td => (
+                                                    <label key={td.id} className="flex items-center gap-1 cursor-pointer select-none">
+                                                        <input
+                                                            type="checkbox"
+                                                            className="w-3.5 h-3.5 accent-brand"
+                                                            checked={form.tipodocs_autoventa.includes(td.id)}
+                                                            onChange={e => {
+                                                                const next = e.target.checked
+                                                                    ? [...form.tipodocs_autoventa, td.id]
+                                                                    : form.tipodocs_autoventa.filter(c => c !== td.id)
+                                                                setForm(f => ({ ...f, tipodocs_autoventa: next }))
+                                                            }}
+                                                        />
+                                                        <span className="text-xs text-slate-600">{td.label}</span>
+                                                    </label>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                                {subError && <p className="text-red-600 text-xs mt-2">{subError}</p>}
+                                <div className="flex justify-end gap-2 mt-4">
+                                    <button type="button" onClick={() => closeConfigModal(false)} className="btn-ghost text-sm">Cancelar</button>
+                                    {agentesOptions.length > 0 && form.empresa_id && (
+                                        <button type="button" onClick={applyAutoventa} className="btn-primary text-sm">Aplicar</button>
+                                    )}
+                                </div>
+                            </>
+                        )}
+
+                        {/* ── Reparto ── */}
+                        {configModal === 'reparto' && (
+                            <>
+                                <h3 className="text-base font-bold mb-4 flex items-center gap-2">
+                                    <Settings className="w-4 h-4 text-green-600" />
+                                    Configuración Reparto
+                                </h3>
+                                {!form.empresa_id ? (
+                                    <p className="text-sm text-green-600 mb-4">Asigna una empresa al usuario antes de configurar Reparto.</p>
+                                ) : loadingPgData ? (
+                                    <p className="text-sm text-slate-400 mb-4">Cargando cajas...</p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-700 mb-1">Caja de cobros del reparto</label>
+                                            <select
+                                                className="input text-sm"
+                                                value={form.caja_reparto ?? ''}
+                                                onChange={e => setForm(f => ({ ...f, caja_reparto: e.target.value ? +e.target.value : null }))}
+                                            >
+                                                <option value="">— Sin caja —</option>
+                                                {cajasOptions.map(c => (
+                                                    <option key={c.codigo} value={c.codigo}>{c.nombre}</option>
+                                                ))}
+                                            </select>
+                                            <p className="text-xs text-slate-400 mt-1">Los cobros del repartidor se registrarán en esta caja.</p>
+                                        </div>
+                                    </div>
+                                )}
+                                {subError && <p className="text-red-600 text-xs mt-2">{subError}</p>}
+                                <div className="flex justify-end gap-2 mt-4">
+                                    <button type="button" onClick={() => closeConfigModal(false)} className="btn-ghost text-sm">Cancelar</button>
+                                    {form.empresa_id && (
+                                        <button type="button" onClick={applyReparto} className="btn-primary text-sm">Aplicar</button>
+                                    )}
+                                </div>
+                            </>
+                        )}
+
+                        {/* ── Expediciones ── */}
+                        {configModal === 'expediciones' && (
+                            <>
+                                <h3 className="text-base font-bold mb-4 flex items-center gap-2">
+                                    <Settings className="w-4 h-4 text-blue-600" />
+                                    Configuración Expediciones
+                                </h3>
+                                {!form.empresa_id ? (
+                                    <p className="text-sm text-blue-600 mb-4">Asigna una empresa al usuario antes de configurar Expediciones.</p>
+                                ) : loadingPgData ? (
+                                    <p className="text-sm text-slate-400 mb-4">Cargando series...</p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-700 mb-2">
+                                                Series de pedidos a gestionar <span className="text-red-500">*</span>
+                                            </label>
+                                            {seriesOptions.length > 0 ? (
+                                                <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                                                    {seriesOptions.map(s => {
+                                                        const checked = form.serie_expediciones.includes(s.serie)
+                                                        return (
+                                                            <label
+                                                                key={s.serie}
+                                                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border cursor-pointer text-xs select-none ${checked ? 'bg-blue-100 border-blue-400 text-blue-800 font-semibold' : 'border-slate-200 text-slate-600'}`}
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="sr-only"
+                                                                    checked={checked}
+                                                                    onChange={e => {
+                                                                        const next = e.target.checked
+                                                                            ? [...form.serie_expediciones, s.serie]
+                                                                            : form.serie_expediciones.filter(x => x !== s.serie)
+                                                                        setForm(f => ({ ...f, serie_expediciones: next }))
+                                                                    }}
+                                                                />
+                                                                {s.serie}
+                                                            </label>
+                                                        )
+                                                    })}
+                                                </div>
+                                            ) : (
+                                                <input
+                                                    className="input text-sm"
+                                                    placeholder="Ej: CI 26 (separadas por coma)"
+                                                    value={form.serie_expediciones.join(', ')}
+                                                    onChange={e => {
+                                                        const vals = e.target.value.split(',').map(v => v.trim()).filter(Boolean)
+                                                        setForm(f => ({ ...f, serie_expediciones: vals }))
+                                                    }}
+                                                />
+                                            )}
+                                            <p className="text-xs text-slate-400 mt-1">El usuario solo verá pedidos de las series seleccionadas. Sin selección = todas.</p>
+                                        </div>
+                                    </div>
+                                )}
+                                {subError && <p className="text-red-600 text-xs mt-2">{subError}</p>}
+                                <div className="flex justify-end gap-2 mt-4">
+                                    <button type="button" onClick={() => closeConfigModal(false)} className="btn-ghost text-sm">Cancelar</button>
+                                    {form.empresa_id && (
+                                        <button type="button" onClick={applyExpediciones} className="btn-primary text-sm">Aplicar</button>
+                                    )}
+                                </div>
+                            </>
+                        )}
+
                     </div>
                 </div>
             )}

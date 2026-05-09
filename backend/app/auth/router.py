@@ -102,4 +102,11 @@ def me(current_user: Usuario = Depends(get_current_user), session: Session = Dep
         empresa_nombre=empresa_nombre,
         locales=[LocalInfo.model_validate(l) for l in locales],
         permisos=normalize_permisos(current_user.permisos or '{}'),
+        agente_autoventa=current_user.agente_autoventa,
+        serie_autoventa=current_user.serie_autoventa,
+        autoventa_modifica_precio=current_user.autoventa_modifica_precio,
+        tipodocs_autoventa=current_user.tipodocs_autoventa or '[]',
+        caja_autoventa=current_user.caja_autoventa,
+        almacen_autoventa=current_user.almacen_autoventa,
+        serie_expediciones=current_user.serie_expediciones or '[]',
     )

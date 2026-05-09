@@ -35,6 +35,9 @@ class Local(SQLModel, table=True):
     empresa_id: int = Field(foreign_key="empresas.id")
     nombre: str = Field(max_length=200)
     activo: bool = Field(default=True)
+    tipo: str = Field(default="definitiva", max_length=20)  # prueba | definitiva
+    fecha_alta: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    fecha_definitiva: Optional[datetime] = Field(default=None)
 
 
 class Usuario(SQLModel, table=True):
@@ -54,7 +57,14 @@ class Usuario(SQLModel, table=True):
     agente_autoventa: Optional[int] = Field(default=None)
     serie_autoventa: Optional[str] = Field(default=None, max_length=20)
     autoventa_modifica_precio: bool = Field(default=False)
-    fpagos_autoventa: str = Field(default='[]', max_length=500)  # JSON array of formaspago codes
+    tipodocs_autoventa: str = Field(default='[]', max_length=100)  # JSON array: [2,4,8]
+    caja_autoventa: Optional[int] = Field(default=None)  # caja donde va el efectivo de autoventa
+    almacen_autoventa: Optional[int] = Field(default=None)  # almacen por defecto para documentos autoventa
+    fpago_autoventa: Optional[int] = Field(default=None)  # forma de pago predeterminada en cobros autoventa
+    solo_clientes_agente: bool = Field(default=False)  # ver solo clientes asignados a su agente
+    caja_reparto: Optional[int] = Field(default=None)  # caja donde van cobros del reparto
+    # Expediciones config (JSON array: ["CI 26", "CI 27"])
+    serie_expediciones: str = Field(default='[]', max_length=500)
 
 
 class UsuarioLocal(SQLModel, table=True):
@@ -62,3 +72,17 @@ class UsuarioLocal(SQLModel, table=True):
 
     usuario_id: int = Field(foreign_key="usuarios.id", primary_key=True)
     local_id: int = Field(foreign_key="locales.id", primary_key=True)
+
+
+class Visita(SQLModel, table=True):
+    __tablename__ = "visitas"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    empresa_id: Optional[int] = Field(default=None, foreign_key="empresas.id")
+    usuario_id: int = Field(foreign_key="usuarios.id")
+    agente_codigo: Optional[int] = Field(default=None)
+    cli_codigo: int
+    cli_nombre: str = Field(max_length=300)
+    fecha: datetime = Field(default_factory=datetime.utcnow)
+    motivo: str = Field(max_length=100)
+    resultado: str = Field(default='', max_length=2000)

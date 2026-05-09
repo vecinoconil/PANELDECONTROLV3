@@ -81,14 +81,33 @@ class UserMe(BaseModel):
     agente_autoventa: Optional[int] = None
     serie_autoventa: Optional[str] = None
     autoventa_modifica_precio: bool = False
-    fpagos_autoventa: list[int] = []
+    tipodocs_autoventa: list[int] = []
+    caja_autoventa: Optional[int] = None
+    almacen_autoventa: Optional[int] = None
+    caja_reparto: Optional[int] = None
+    serie_expediciones: list[str] = []
 
-    @field_validator('fpagos_autoventa', mode='before')
+    @field_validator('tipodocs_autoventa', mode='before')
     @classmethod
-    def parse_fpagos_me(cls, v):
+    def parse_tipodocs_me(cls, v):
         if isinstance(v, str):
             return json.loads(v or '[]')
         return v or []
+
+    @field_validator('serie_expediciones', mode='before')
+    @classmethod
+    def parse_series_me(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v or '[]')
+                return parsed if isinstance(parsed, list) else [parsed]
+            except (json.JSONDecodeError, ValueError):
+                return [v] if v else []
+        return []
 
     class Config:
         from_attributes = True
@@ -142,11 +161,14 @@ class EmpresaRead(BaseModel):
 class LocalCreate(BaseModel):
     empresa_id: int
     nombre: str
+    tipo: str = "prueba"  # prueba | definitiva
 
 
 class LocalUpdate(BaseModel):
+    empresa_id: Optional[int] = None
     nombre: Optional[str] = None
     activo: Optional[bool] = None
+    tipo: Optional[str] = None
 
 
 class LocalRead(BaseModel):
@@ -154,6 +176,9 @@ class LocalRead(BaseModel):
     empresa_id: int
     nombre: str
     activo: bool
+    tipo: str = "definitiva"
+    fecha_alta: Optional[datetime] = None
+    fecha_definitiva: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -177,7 +202,13 @@ class UsuarioCreate(BaseModel):
     agente_autoventa: Optional[int] = None
     serie_autoventa: Optional[str] = None
     autoventa_modifica_precio: bool = False
-    fpagos_autoventa: list[int] = []
+    tipodocs_autoventa: list[int] = []
+    caja_autoventa: Optional[int] = None
+    almacen_autoventa: Optional[int] = None
+    fpago_autoventa: Optional[int] = None
+    solo_clientes_agente: bool = False
+    caja_reparto: Optional[int] = None
+    serie_expediciones: list[str] = []
 
 
 class UsuarioUpdate(BaseModel):
@@ -199,7 +230,13 @@ class UsuarioUpdate(BaseModel):
     agente_autoventa: Optional[int] = None
     serie_autoventa: Optional[str] = None
     autoventa_modifica_precio: Optional[bool] = None
-    fpagos_autoventa: Optional[list[int]] = None
+    tipodocs_autoventa: Optional[list[int]] = None
+    caja_autoventa: Optional[int] = None
+    almacen_autoventa: Optional[int] = None
+    fpago_autoventa: Optional[int] = None
+    solo_clientes_agente: Optional[bool] = None
+    caja_reparto: Optional[int] = None
+    serie_expediciones: Optional[list[str]] = None
 
 
 class UsuarioRead(BaseModel):
@@ -216,19 +253,40 @@ class UsuarioRead(BaseModel):
     agente_autoventa: Optional[int] = None
     serie_autoventa: Optional[str] = None
     autoventa_modifica_precio: bool = False
-    fpagos_autoventa: list[int] = []
+    tipodocs_autoventa: list[int] = []
+    caja_autoventa: Optional[int] = None
+    almacen_autoventa: Optional[int] = None
+    fpago_autoventa: Optional[int] = None
+    solo_clientes_agente: bool = False
+    caja_reparto: Optional[int] = None
+    serie_expediciones: list[str] = []
 
     @field_validator('permisos', mode='before')
     @classmethod
     def parse_permisos(cls, v):
         return normalize_permisos(v)
 
-    @field_validator('fpagos_autoventa', mode='before')
+    @field_validator('tipodocs_autoventa', mode='before')
     @classmethod
-    def parse_fpagos(cls, v):
+    def parse_tipodocs(cls, v):
         if isinstance(v, str):
             return json.loads(v or '[]')
         return v or []
+
+    @field_validator('serie_expediciones', mode='before')
+    @classmethod
+    def parse_series_read(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v or '[]')
+                return parsed if isinstance(parsed, list) else [parsed]
+            except (json.JSONDecodeError, ValueError):
+                return [v] if v else []
+        return []
 
     class Config:
         from_attributes = True

@@ -18,7 +18,7 @@ def get_session():
 
 def create_db_and_tables():
     """Create all tables on startup if they do not exist."""
-    from app.models.app_models import Empresa, Local, Usuario, UsuarioLocal  # noqa: F401
+    from app.models.app_models import Empresa, Local, Usuario, UsuarioLocal, Visita  # noqa: F401
     SQLModel.metadata.create_all(engine)
     _run_migrations()
 
@@ -28,6 +28,43 @@ def _run_migrations():
     with engine.connect() as conn:
         conn.execute(text(
             "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permisos VARCHAR(2000) DEFAULT '[]'"
+        ))
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS tipodocs_autoventa VARCHAR(100) DEFAULT '[]'"
+        ))
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS caja_autoventa INTEGER"
+        ))
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS serie_expediciones VARCHAR(500)"
+        ))
+        try:
+            conn.execute(text(
+                "ALTER TABLE usuarios ALTER COLUMN serie_expediciones TYPE VARCHAR(500)"
+            ))
+        except Exception:
+            pass  # SQLite no soporta ALTER COLUMN TYPE
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS almacen_autoventa INTEGER"
+        ))
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS fpago_autoventa INTEGER"
+        ))
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS solo_clientes_agente BOOLEAN DEFAULT FALSE"
+        ))
+        # Locales: tipo prueba/definitiva y fechas
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS caja_reparto INTEGER"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'definitiva'"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS fecha_alta TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS fecha_definitiva TIMESTAMP"
         ))
         conn.commit()
 

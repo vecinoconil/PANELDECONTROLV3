@@ -3,6 +3,8 @@ import { Outlet } from 'react-router-dom'
 import { Menu } from 'lucide-react'
 import Sidebar from './Sidebar'
 
+declare const __BUILD_TIME__: string
+
 export default function Layout() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
@@ -17,7 +19,12 @@ export default function Layout() {
                 >
                     <Menu className="w-5 h-5" />
                 </button>
-                <span className="ml-3 text-sm font-semibold text-white">SOLBA PANEL V3</span>
+                <div className="ml-3">
+                    <span className="text-sm font-semibold text-white">SOLBA PANEL V3</span>
+                    <p className="text-white/50 text-[10px] leading-tight">
+                        Build: {new Date(__BUILD_TIME__).toLocaleString('es-ES', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' })}
+                    </p>
+                </div>
             </header>
 
             <Sidebar mobileOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />

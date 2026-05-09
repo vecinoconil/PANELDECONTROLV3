@@ -10,6 +10,14 @@ import Empresas from './pages/admin/Empresas'
 import Locales from './pages/admin/Locales'
 import Usuarios from './pages/admin/Usuarios'
 import Autoventa from './pages/autoventa/Autoventa'
+import Inventario from './pages/inventario/Inventario'
+import Expediciones from './pages/almacen/Expediciones'
+import HojasCarga from './pages/almacen/HojasCarga'
+import Reparto from './pages/almacen/Reparto'
+import RecepcionPedidos from './pages/almacen/RecepcionPedidos'
+import Contratos from './pages/contratos/Contratos'
+import SeguimientoLocales from './pages/admin/SeguimientoLocales'
+import BasesDatos from './pages/admin/BasesDatos'
 
 export default function App() {
     return (
@@ -39,6 +47,31 @@ export default function App() {
                             </Route>
                             <Route element={<ProtectedRoute requiredPermission="autoventa" action="entrar" />}>
                                 <Route path="/autoventa" element={<Autoventa />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="inventario" action="entrar" />}>
+                                <Route path="/inventario" element={<Inventario />} />
+                                <Route path="/almacen/inventarios" element={<Inventario />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="expediciones" action="entrar" />}>
+                                <Route path="/almacen/expediciones" element={<Expediciones />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="hojas_carga" action="entrar" />}>
+                                <Route path="/almacen/hojas-carga" element={<HojasCarga />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="reparto" action="entrar" />}>
+                                <Route path="/almacen/reparto" element={<Reparto />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="recepcion_pedidos" action="entrar" />}>
+                                <Route path="/almacen/recepcion-pedidos" element={<RecepcionPedidos />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="contratos" action="entrar" />}>
+                                <Route path="/contratos" element={<Contratos />} />
+                            </Route>
+                            <Route element={<ProtectedRoute requiredPermission="seguimiento_locales" action="entrar" />}>
+                                <Route path="/seguimiento-locales" element={<SeguimientoLocales />} />
+                            </Route>
+                            <Route element={<ProtectedRoute />}>
+                                <Route path="/admin/bases-datos" element={<BasesDatos />} />
                             </Route>
                         </Route>
                     </Route>

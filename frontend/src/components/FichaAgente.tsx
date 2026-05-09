@@ -224,10 +224,10 @@ export default function FichaAgente({ agenteCodigo, agenteNombre, initialAnio, o
         : 0
 
     return (
-        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-2 sm:p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-[1600px] h-[95vh] flex flex-col overflow-hidden">
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-3 border-b bg-slate-50 shrink-0">
+                <div className="flex items-center justify-between px-3 sm:px-6 py-3 border-b bg-slate-50 shrink-0">
                     <h2 className="text-lg font-bold text-slate-800 truncate">
                         Análisis Ventas de Agentes y Comisiones – {data.agente.nombre}
                     </h2>
@@ -243,10 +243,10 @@ export default function FichaAgente({ agenteCodigo, agenteNombre, initialAnio, o
                 </div>
 
                 {/* Body */}
-                <div className="flex-1 overflow-hidden p-4">
-                    <div className="grid grid-cols-12 gap-4 h-full">
+                <div className="flex-1 overflow-auto md:overflow-hidden p-3 md:p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:h-full">
                         {/* ═══ LEFT COLUMN: Chart + Tabs ═══ */}
-                        <div className="col-span-7 flex flex-col gap-4 h-full min-h-0">
+                        <div className="md:col-span-7 flex flex-col gap-4 md:h-full md:min-h-0">
                             {/* Line Chart */}
                             <div className="bg-white border rounded-lg p-3 shrink-0" style={{ height: 240 }}>
                                 <ResponsiveContainer width="100%" height="100%">
@@ -265,19 +265,19 @@ export default function FichaAgente({ agenteCodigo, agenteNombre, initialAnio, o
                             </div>
 
                             {/* Tabs */}
-                            <div className="bg-white border rounded-lg flex-1 flex flex-col min-h-0">
-                                <div className="flex border-b shrink-0">
+                            <div className="bg-white border rounded-lg flex flex-col min-h-[320px] md:flex-1 md:min-h-0">
+                                <div className="flex border-b shrink-0 overflow-x-auto">
                                     <button
-                                        className={`px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 ${tab === 'comisiones' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                                        className={`px-3 sm:px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 shrink-0 whitespace-nowrap ${tab === 'comisiones' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
                                         onClick={() => setTab('comisiones')}
-                                    ><FileText size={14} /> Comisiones Liquidables</button>
+                                    ><FileText size={14} /> <span className="hidden sm:inline">Comisiones </span>Liquid.</button>
                                     <button
-                                        className={`px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 ${tab === 'pendientes' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                                        className={`px-3 sm:px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 shrink-0 whitespace-nowrap ${tab === 'pendientes' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
                                         onClick={() => setTab('pendientes')}
-                                    ><Clock size={14} /> Pendientes de Cobro</button>
+                                    ><Clock size={14} /> Pendientes</button>
                                     {data.has_visitas && (
                                         <button
-                                            className={`px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 ${tab === 'visitas' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                                            className={`px-3 sm:px-4 py-2 text-xs font-medium flex items-center gap-1.5 border-b-2 shrink-0 whitespace-nowrap ${tab === 'visitas' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
                                             onClick={() => setTab('visitas')}
                                         ><MapPin size={14} /> Visitas</button>
                                     )}
@@ -495,9 +495,9 @@ export default function FichaAgente({ agenteCodigo, agenteNombre, initialAnio, o
                         </div>
 
                         {/* ═══ RIGHT COLUMN: KPIs + TOP ═══ */}
-                        <div className="col-span-5 flex flex-col gap-3 h-full min-h-0 overflow-hidden">
+                        <div className="md:col-span-5 flex flex-col gap-3 md:h-full md:min-h-0 md:overflow-hidden">
                             {/* KPI Row 1 */}
-                            <div className="grid grid-cols-4 gap-2 shrink-0">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
                                 <KpiCard label="Volumen Ventas" icon="💰"
                                     value={`${fmt(kpis.ventas_anio)} €`}
                                     sub={kpis.ventas_anio_anterior > 0
@@ -510,7 +510,7 @@ export default function FichaAgente({ agenteCodigo, agenteNombre, initialAnio, o
                             </div>
 
                             {/* KPI Row 2 */}
-                            <div className="grid grid-cols-4 gap-2 shrink-0">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
                                 <KpiCard label="Valor/Visita" icon="📊" value={`${fmt(kpis.valor_por_visita)} €`} />
                                 <KpiCard label="Margen Generado" icon="🎯"
                                     value={`${fmt(kpis.margen_anio)} €`}
@@ -525,7 +525,7 @@ export default function FichaAgente({ agenteCodigo, agenteNombre, initialAnio, o
                             </div>
 
                             {/* TOP Productos */}
-                            <div className="border rounded-lg flex-1 flex flex-col min-h-0">
+                            <div className="border rounded-lg flex flex-col min-h-[280px] md:flex-1 md:min-h-0">
                                 <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
                                     <h3 className="text-xs font-semibold text-slate-700">TOP Ventas por año</h3>
                                     <select value={topAnio} onChange={e => setTopAnio(Number(e.target.value))} className="border rounded px-2 py-0.5 text-xs">
@@ -578,7 +578,7 @@ export default function FichaAgente({ agenteCodigo, agenteNombre, initialAnio, o
                                 )}
                                 {!docLoading && docDetalle && (
                                     <div className="space-y-4">
-                                        <div className="grid grid-cols-4 gap-3 text-xs">
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                                             <div><span className="text-slate-400">Tipo:</span> <span className="font-semibold">{docDetalle.cabecera.tipodoc === 8 ? 'Factura' : docDetalle.cabecera.tipodoc === 4 ? 'Albarán' : `Doc ${docDetalle.cabecera.tipodoc}`}</span></div>
                                             <div><span className="text-slate-400">Serie/Num:</span> <span className="font-semibold">{docDetalle.cabecera.serie}-{docDetalle.cabecera.numero}</span></div>
                                             <div><span className="text-slate-400">Fecha:</span> <span className="font-semibold">{docDetalle.cabecera.fecha}</span></div>

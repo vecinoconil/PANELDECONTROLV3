@@ -21,7 +21,20 @@ export default function ProtectedRoute({ requiredPermission, action = 'entrar' }
     if (!user) return <Navigate to="/login" replace />
 
     if (requiredPermission && user.rol !== 'superadmin') {
-        const ok = hasPermiso(user.permisos, requiredPermission, action)
+        let ok: boolean
+        if (user.rol === 'gerente') {
+            // Gerente: acceso completo si no tiene permisos configurados;
+            // si tiene alguno definido, se comprueba estrictamente.
+            const hasAnyPermiso = Object.keys(user.permisos || {}).length > 0
+            if (!hasAnyPermiso) {
+                ok = true
+            } else {
+                const p = user.permisos[requiredPermission]
+                ok = p !== undefined && (action === 'ver' ? !!p.ver : !!p.entrar)
+            }
+        } else {
+            ok = hasPermiso(user.permisos, requiredPermission, action)
+        }
         if (!ok) return <Navigate to="/dashboard" replace />
     }
 

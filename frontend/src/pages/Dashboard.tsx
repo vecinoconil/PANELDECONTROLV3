@@ -40,6 +40,8 @@ export default function Dashboard() {
     const [agente, setAgente] = useState('')
     const [seriesOpen, setSeriesOpen] = useState(false)
     const seriesRef = useRef<HTMLDivElement>(null)
+    const seriesMobileRef = useRef<HTMLDivElement>(null)
+    const [filtersOpen, setFiltersOpen] = useState(false)
 
     // Familia modal state
     const [familiaModal, setFamiliaModal] = useState<string | null>(null)
@@ -119,7 +121,9 @@ export default function Dashboard() {
     // Close series dropdown on outside click
     useEffect(() => {
         const handler = (e: MouseEvent) => {
-            if (seriesRef.current && !seriesRef.current.contains(e.target as Node)) setSeriesOpen(false)
+            const inDesktop = seriesRef.current?.contains(e.target as Node)
+            const inMobile = seriesMobileRef.current?.contains(e.target as Node)
+            if (!inDesktop && !inMobile) setSeriesOpen(false)
         }
         document.addEventListener('mousedown', handler)
         return () => document.removeEventListener('mousedown', handler)
@@ -464,11 +468,13 @@ export default function Dashboard() {
                                                 <td className="text-right py-1 pr-2 text-slate-500">{fmt(v.total_fra)} €</td>
                                                 <td className="text-right py-1 pr-2 font-semibold text-red-600">{fmt(v.pendiente)} €</td>
                                                 <td className="text-center py-1">
-                                                    {v.pendiente <= 0
-                                                        ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Pagado</span>
-                                                        : v.pendiente < v.total_fra
-                                                            ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">A Cuenta</span>
-                                                            : <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Pendiente</span>}
+                                                    {v.pendiente < 0
+                                                        ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-700">Abono</span>
+                                                        : v.pendiente === 0
+                                                            ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Pagado</span>
+                                                            : v.pendiente < v.total_fra
+                                                                ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">A Cuenta</span>
+                                                                : <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Pendiente</span>}
                                                 </td>
                                             </tr>
                                         ))}
@@ -792,70 +798,154 @@ export default function Dashboard() {
             )}
 
             {/* Filters bar */}
-            <div className="bg-blue-600 px-5 py-3 flex flex-wrap items-center gap-4 sticky top-0 z-40 shadow-md">
-                <Filter className="w-5 h-5 text-blue-200" />
-                <div className="flex items-center gap-2">
-                    <label className="text-sm text-blue-100 font-medium">Año:</label>
-                    <input type="number" value={anio} onChange={e => setAnio(+e.target.value)}
-                        className="input w-24 !py-1.5 text-sm !bg-white/90 !border-blue-300" />
-                </div>
-                <div className="flex items-center gap-2">
-                    <label className="text-sm text-blue-100 font-medium">Meses:</label>
-                    <select value={mesDesde} onChange={e => setMesDesde(+e.target.value)} className="input w-20 !py-1.5 text-sm !bg-white/90 !border-blue-300">
-                        {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-                    </select>
-                    <span className="text-sm text-blue-200">a</span>
-                    <select value={mesHasta} onChange={e => setMesHasta(+e.target.value)} className="input w-20 !py-1.5 text-sm !bg-white/90 !border-blue-300">
-                        {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-                    </select>
-                </div>
-                <div className="relative" ref={seriesRef}>
-                    <label className="text-sm text-blue-100 font-medium mr-2">Series:</label>
-                    <button
-                        onClick={() => setSeriesOpen(!seriesOpen)}
-                        className="input inline-flex items-center gap-1 !w-auto min-w-[140px] !py-1.5 text-sm !bg-white/90 !border-blue-300"
-                    >
-                        {selectedSeries.length === 0 ? 'Todas' : `${selectedSeries.length} sel.`}
-                        <ChevronDown className="w-3.5 h-3.5 ml-auto" />
-                    </button>
-                    {seriesOpen && data?.filtros.series && (
-                        <div className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[180px] max-h-60 overflow-y-auto">
-                            <div className="px-3 py-1.5 border-b border-slate-100">
-                                <button onClick={clearSeries} className="text-[11px] text-brand hover:underline">Limpiar selección</button>
-                            </div>
-                            {data.filtros.series.map(s => (
-                                <label key={s} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-xs">
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedSeries.includes(s)}
-                                        onChange={() => toggleSerie(s)}
-                                        className="rounded border-slate-300 text-brand focus:ring-brand"
-                                    />
-                                    {s}
-                                </label>
-                            ))}
+            <div className="bg-blue-600 sticky top-0 z-40 shadow-md">
+
+                {/* ── Fila principal (siempre visible) ─────────────────────── */}
+                <div className="px-4 py-2.5 flex items-center gap-3">
+                    <Filter className="w-4 h-4 text-blue-200 shrink-0" />
+
+                    {/* Año */}
+                    <div className="flex items-center">
+                        <input type="number" value={anio} onChange={e => setAnio(+e.target.value)}
+                            className="input w-16 !py-1 text-sm !bg-white/90 !border-blue-300 !rounded-r-none" />
+                        <div className="flex flex-col border border-blue-300 rounded-r-lg overflow-hidden">
+                            <button onClick={() => setAnio(a => a + 1)}
+                                className="px-1.5 py-0.5 bg-white/80 hover:bg-white text-slate-600 leading-none text-[10px] border-b border-blue-200">▲</button>
+                            <button onClick={() => setAnio(a => a - 1)}
+                                className="px-1.5 py-0.5 bg-white/80 hover:bg-white text-slate-600 leading-none text-[10px]">▼</button>
                         </div>
-                    )}
+                    </div>
+
+                    {/* Desktop: Meses */}
+                    <div className="hidden md:flex items-center gap-2">
+                        <label className="text-sm text-blue-100 font-medium">Meses:</label>
+                        <select value={mesDesde} onChange={e => setMesDesde(+e.target.value)} className="input w-20 !py-1.5 text-sm !bg-white/90 !border-blue-300">
+                            {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                        </select>
+                        <span className="text-sm text-blue-200">a</span>
+                        <select value={mesHasta} onChange={e => setMesHasta(+e.target.value)} className="input w-20 !py-1.5 text-sm !bg-white/90 !border-blue-300">
+                            {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                        </select>
+                    </div>
+
+                    {/* Desktop: Series */}
+                    <div className="hidden md:block relative" ref={seriesRef}>
+                        <label className="text-sm text-blue-100 font-medium mr-2">Series:</label>
+                        <button onClick={() => setSeriesOpen(!seriesOpen)}
+                            className="input inline-flex items-center gap-1 !w-auto min-w-[130px] !py-1.5 text-sm !bg-white/90 !border-blue-300">
+                            {selectedSeries.length === 0 ? 'Todas' : `${selectedSeries.length} sel.`}
+                            <ChevronDown className="w-3.5 h-3.5 ml-auto" />
+                        </button>
+                        {seriesOpen && data?.filtros.series && (
+                            <div className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[160px] max-h-60 overflow-y-auto">
+                                <div className="px-3 py-1.5 border-b border-slate-100">
+                                    <button onClick={clearSeries} className="text-[11px] text-brand hover:underline">Limpiar selección</button>
+                                </div>
+                                {data.filtros.series.map(s => (
+                                    <label key={s} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-xs">
+                                        <input type="checkbox" checked={selectedSeries.includes(s)} onChange={() => toggleSerie(s)} className="rounded border-slate-300 text-brand focus:ring-brand" />
+                                        {s}
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Desktop: Agente */}
+                    <div className="hidden md:flex items-center gap-2">
+                        <label className="text-sm text-blue-100 font-medium">Agente:</label>
+                        <select value={agente} onChange={e => setAgente(e.target.value)} className="input w-36 !py-1.5 text-sm !bg-white/90 !border-blue-300">
+                            <option value="">Todos</option>
+                            {data?.filtros.agentes.map(a => <option key={a.codigo} value={a.codigo}>{a.nombre}</option>)}
+                        </select>
+                    </div>
+
+                    {/* Botones lado derecho */}
+                    <div className="flex items-center gap-2 ml-auto">
+                        <button onClick={fetchData} className="bg-white text-blue-600 font-semibold py-1.5 px-3 text-sm rounded-lg flex items-center gap-1.5 hover:bg-blue-50 transition-colors">
+                            <RefreshCw className="w-4 h-4" />
+                            <span className="hidden sm:inline">Actualizar</span>
+                        </button>
+                        <button onClick={() => openIvaTrimestral()} className="hidden md:flex bg-blue-500 text-white font-semibold py-1.5 px-3 text-sm rounded-lg items-center gap-1.5 hover:bg-blue-400 transition-colors border border-blue-400">
+                            <Receipt className="w-4 h-4" />
+                            <span className="hidden lg:inline">IVA Trim.</span>
+                        </button>
+                        <button onClick={() => setVtoModalOpen(true)} className="hidden md:flex bg-blue-500 text-white font-semibold py-1.5 px-3 text-sm rounded-lg items-center gap-1.5 hover:bg-blue-400 transition-colors border border-blue-400">
+                            <Clock className="w-4 h-4" />
+                            <span className="hidden lg:inline">Vtos.</span>
+                        </button>
+                        {/* Mobile: toggle filtros */}
+                        <button onClick={() => setFiltersOpen(o => !o)}
+                            className="md:hidden bg-blue-500/80 text-white p-1.5 rounded-lg border border-blue-400 flex items-center gap-1">
+                            {filtersOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </button>
+                    </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <label className="text-sm text-blue-100 font-medium">Agente:</label>
-                    <select value={agente} onChange={e => setAgente(e.target.value)} className="input w-40 !py-1.5 text-sm !bg-white/90 !border-blue-300">
-                        <option value="">Todos</option>
-                        {data?.filtros.agentes.map(a => <option key={a.codigo} value={a.codigo}>{a.nombre}</option>)}
-                    </select>
-                </div>
-                <button onClick={fetchData} className="bg-white text-blue-600 font-semibold !py-1.5 !px-4 text-sm rounded-lg flex items-center gap-1.5 hover:bg-blue-50 transition-colors">
-                    <RefreshCw className="w-4 h-4" />
-                    Actualizar
-                </button>
-                <button onClick={() => openIvaTrimestral()} className="bg-blue-500 text-white font-semibold !py-1.5 !px-4 text-sm rounded-lg flex items-center gap-1.5 hover:bg-blue-400 transition-colors border border-blue-300">
-                    <Receipt className="w-4 h-4" />
-                    IVA Trimestral
-                </button>
-                <button onClick={() => setVtoModalOpen(true)} className="bg-blue-500 text-white font-semibold !py-1.5 !px-4 text-sm rounded-lg flex items-center gap-1.5 hover:bg-blue-400 transition-colors border border-blue-300">
-                    <Clock className="w-4 h-4" />
-                    Vtos. Pendientes
-                </button>
+
+                {/* ── Panel expandible mobile ───────────────────────────────── */}
+                {filtersOpen && (
+                    <div className="md:hidden border-t border-blue-500/60 px-4 pb-4 pt-3 space-y-3">
+                        {/* Meses */}
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label className="text-[11px] text-blue-200 font-medium block mb-1">Desde</label>
+                                <select value={mesDesde} onChange={e => setMesDesde(+e.target.value)} className="input w-full !py-1.5 text-sm !bg-white/90 !border-blue-300">
+                                    {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-[11px] text-blue-200 font-medium block mb-1">Hasta</label>
+                                <select value={mesHasta} onChange={e => setMesHasta(+e.target.value)} className="input w-full !py-1.5 text-sm !bg-white/90 !border-blue-300">
+                                    {MESES.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                        {/* Series + Agente */}
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="relative" ref={seriesMobileRef}>
+                                <label className="text-[11px] text-blue-200 font-medium block mb-1">Series</label>
+                                <button onClick={() => setSeriesOpen(!seriesOpen)}
+                                    className="input w-full inline-flex items-center !py-1.5 text-sm !bg-white/90 !border-blue-300">
+                                    <span className="flex-1 text-left">{selectedSeries.length === 0 ? 'Todas' : `${selectedSeries.length} sel.`}</span>
+                                    <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                                </button>
+                                {seriesOpen && data?.filtros.series && (
+                                    <div className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[140px] max-h-48 overflow-y-auto">
+                                        <div className="px-3 py-1.5 border-b border-slate-100">
+                                            <button onClick={clearSeries} className="text-[11px] text-brand hover:underline">Limpiar</button>
+                                        </div>
+                                        {data.filtros.series.map(s => (
+                                            <label key={s} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-xs">
+                                                <input type="checkbox" checked={selectedSeries.includes(s)} onChange={() => toggleSerie(s)} className="rounded border-slate-300" />
+                                                {s}
+                                            </label>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div>
+                                <label className="text-[11px] text-blue-200 font-medium block mb-1">Agente</label>
+                                <select value={agente} onChange={e => setAgente(e.target.value)} className="input w-full !py-1.5 text-sm !bg-white/90 !border-blue-300">
+                                    <option value="">Todos</option>
+                                    {data?.filtros.agentes.map(a => <option key={a.codigo} value={a.codigo}>{a.nombre}</option>)}
+                                </select>
+                            </div>
+                        </div>
+                        {/* Botones de acción */}
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                            <button onClick={() => { openIvaTrimestral(); setFiltersOpen(false) }}
+                                className="bg-blue-500/80 text-white font-semibold py-2 text-sm rounded-lg flex items-center justify-center gap-1.5 hover:bg-blue-400 border border-blue-400">
+                                <Receipt className="w-4 h-4" />
+                                IVA Trimestral
+                            </button>
+                            <button onClick={() => { setVtoModalOpen(true); setFiltersOpen(false) }}
+                                className="bg-blue-500/80 text-white font-semibold py-2 text-sm rounded-lg flex items-center justify-center gap-1.5 hover:bg-blue-400 border border-blue-400">
+                                <Clock className="w-4 h-4" />
+                                Vtos. Pendientes
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Content */}
@@ -909,8 +999,8 @@ export default function Dashboard() {
                                     </div>
                                 ) : undefined}
                             />
-                            <KPICard icon={<Wallet className="w-4 h-4" />} label="Pte. Cobro" value={fmt(data.vencimientos.clientes)} color="text-amber-600" onClick={() => openPteCobro()} />
-                            <KPICard icon={<TrendingDown className="w-4 h-4" />} label="Pte. Pago" value={fmt(data.vencimientos.proveedores)} color="text-red-600" onClick={() => openVencimientos(1)} />
+                            <KPICard icon={<Wallet className="w-4 h-4" />} label="Pte. Cobro" value={fmt(data.vencimientos.clientes)} color="text-amber-600" sub={data.vencimientos.clientes_otros_anios > 0 ? `Otros años: ${fmt(data.vencimientos.clientes_otros_anios)} €` : undefined} onClick={() => openPteCobro()} />
+                            <KPICard icon={<TrendingDown className="w-4 h-4" />} label="Pte. Pago" value={fmt(data.vencimientos.proveedores)} color="text-red-600" sub={data.vencimientos.proveedores_otros_anios > 0 ? `Otros años: ${fmt(data.vencimientos.proveedores_otros_anios)} €` : undefined} onClick={() => openVencimientos(1)} />
                         </div>
 
                         {/* Vencimientos Modal */}

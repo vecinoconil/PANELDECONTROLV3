@@ -22,8 +22,15 @@ export default function Login() {
         try {
             await login(email, password)
             navigate('/dashboard', { replace: true })
-        } catch {
-            setError('Credenciales incorrectas')
+        } catch (err: any) {
+            const status = err?.response?.status
+            if (status === 401) {
+                setError('Credenciales incorrectas')
+            } else if (status === 403) {
+                setError('Usuario inactivo o sin acceso')
+            } else {
+                setError('Error al conectar con el servidor. Inténtalo de nuevo.')
+            }
         } finally {
             setLoading(false)
         }

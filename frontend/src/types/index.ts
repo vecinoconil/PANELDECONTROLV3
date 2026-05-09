@@ -16,6 +16,10 @@ export interface UserMe {
     serie_autoventa: string | null
     autoventa_modifica_precio: boolean
     fpagos_autoventa: number[]
+    tipodocs_autoventa: number[]
+    caja_autoventa: number | null
+    caja_reparto: number | null
+    serie_expediciones: string[]
 }
 
 export interface PermisoFlags {
@@ -40,7 +44,13 @@ export const PERMISOS_DISPONIBLES = [
     { key: 'dashboard',          label: 'Dashboard' },
     { key: 'comparativa_ventas', label: 'Comparativa Ventas' },
     { key: 'contabilidad',       label: 'Contabilidad' },
+    { key: 'contratos',          label: 'Gestión de Contratos' },
     { key: 'autoventa',          label: 'Autoventa' },
+    { key: 'expediciones',       label: 'Expediciones' },
+    { key: 'hojas_carga',        label: 'Hojas de Carga' },
+    { key: 'reparto',            label: 'Reparto' },
+    { key: 'recepcion_pedidos',  label: 'Recepción de Pedidos' },
+    { key: 'inventario',         label: 'Inventarios' },
     { key: 'admin_empresas',     label: 'Admin Empresas' },
     { key: 'admin_locales',      label: 'Admin Locales' },
     { key: 'admin_usuarios',     label: 'Admin Usuarios' },
@@ -317,6 +327,8 @@ export interface CuadroMandosData {
     vencimientos: {
         proveedores: number
         clientes: number
+        clientes_otros_anios: number
+        proveedores_otros_anios: number
     }
     consumo_familias: ConsumoFamilia[]
     series_iva: SerieIVA[]

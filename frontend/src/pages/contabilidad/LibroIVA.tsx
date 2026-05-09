@@ -123,74 +123,85 @@ export default function LibroIVA() {
     const ftLCls = 'py-1.5 px-2 text-left text-xs font-bold bg-slate-100 border-t border-slate-300'
 
     return (
-        <div className="p-6 flex flex-col gap-4 h-full">
+        <div className="flex flex-col h-full">
             {/* Header */}
-            <div className="flex items-center gap-2">
-                <BookText className="w-5 h-5 text-brand" />
-                <h1 className="text-xl font-bold">Contabilidad</h1>
-            </div>
+            <div className="bg-white shadow-sm flex-shrink-0 px-3 md:px-6 pt-3 md:pt-5 pb-2">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-violet-700 flex items-center justify-center shadow-sm flex-shrink-0">
+                            <BookText className="w-4 h-4 text-white" />
+                        </div>
+                        <div>
+                            <h1 className="text-sm font-bold text-slate-800 leading-tight">Contabilidad</h1>
+                            <p className="text-[10px] text-slate-400">Libro de IVA</p>
+                        </div>
+                    </div>
+                    {buscado && facturas.length > 0 && (
+                        <button onClick={exportarCSV}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 flex-shrink-0">
+                            <Download size={13} /> CSV
+                        </button>
+                    )}
+                </div>
 
-            {/* Tabs */}
-            <div className="flex gap-1 border-b">
-                {(['emitidas', 'recibidas'] as Tab[]).map(t => (
-                    <button key={t} onClick={() => { setTab(t); setFacturas([]); setBuscado(false) }}
-                        className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === t ? 'border-brand text-brand' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-                        {t === 'emitidas' ? 'Facturas Emitidas' : 'Facturas Recibidas'}
-                    </button>
-                ))}
+                {/* Tabs */}
+                <div className="flex gap-0.5 border-b border-slate-200">
+                    {(['emitidas', 'recibidas'] as Tab[]).map(t => (
+                        <button key={t} onClick={() => { setTab(t); setFacturas([]); setBuscado(false) }}
+                            className={`px-3 md:px-5 py-2 text-xs font-medium border-b-2 -mb-px transition-colors ${tab === t ? 'border-violet-600 text-violet-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                            {t === 'emitidas' ? 'Emitidas' : 'Recibidas'}
+                        </button>
+                    ))}
+                </div>
             </div>
 
             {/* Filters */}
-            <div className="flex flex-wrap items-end gap-3 bg-white border rounded-lg px-4 py-3">
-                <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-500">Año</label>
-                    <select value={anio} onChange={e => handleAnioChange(Number(e.target.value))}
-                        className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:border-brand">
-                        {Array.from({ length: 6 }, (_, i) => hoy.getFullYear() - i).map(y => (
-                            <option key={y} value={y}>{y}</option>
-                        ))}
-                    </select>
-                </div>
-                <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-500">Período</label>
-                    <select value={trimestre} onChange={e => applyTrim(e.target.value as Trimestre, anio)}
-                        className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:border-brand">
-                        {TRIMESTRES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
-                    </select>
-                </div>
-                <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-500">Desde</label>
-                    <input type="date" value={desde} onChange={e => { setDesde(e.target.value); setTrimestre('anio') }}
-                        className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:border-brand" />
-                </div>
-                <div className="flex flex-col gap-1">
-                    <label className="text-xs font-medium text-slate-500">Hasta</label>
-                    <input type="date" value={hasta} onChange={e => { setHasta(e.target.value); setTrimestre('anio') }}
-                        className="border rounded px-2 py-1.5 text-sm focus:outline-none focus:border-brand" />
-                </div>
-                <button onClick={buscar} disabled={loading}
-                    className="flex items-center gap-1.5 px-4 py-1.5 bg-brand text-white rounded-lg text-sm font-medium hover:bg-brand/90 disabled:opacity-50">
-                    <Search size={14} />
-                    {loading ? 'Cargando...' : 'Buscar'}
-                </button>
-                {buscado && facturas.length > 0 && (
-                    <button onClick={exportarCSV}
-                        className="flex items-center gap-1.5 px-4 py-1.5 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700">
-                        <Download size={14} /> Exportar CSV
+            <div className="flex-shrink-0 bg-slate-50 border-b border-slate-200 px-3 md:px-6 py-2.5">
+                <div className="flex flex-wrap items-end gap-2">
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Año</label>
+                        <select value={anio} onChange={e => handleAnioChange(Number(e.target.value))}
+                            className="border border-slate-200 rounded-md px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-violet-400">
+                            {Array.from({ length: 6 }, (_, i) => hoy.getFullYear() - i).map(y => (
+                                <option key={y} value={y}>{y}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Período</label>
+                        <select value={trimestre} onChange={e => applyTrim(e.target.value as Trimestre, anio)}
+                            className="border border-slate-200 rounded-md px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-violet-400">
+                            {TRIMESTRES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                        </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Desde</label>
+                        <input type="date" value={desde} onChange={e => { setDesde(e.target.value); setTrimestre('anio') }}
+                            className="border border-slate-200 rounded-md px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-violet-400" />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Hasta</label>
+                        <input type="date" value={hasta} onChange={e => { setHasta(e.target.value); setTrimestre('anio') }}
+                            className="border border-slate-200 rounded-md px-2 py-1.5 text-xs bg-white focus:outline-none focus:border-violet-400" />
+                    </div>
+                    <button onClick={buscar} disabled={loading}
+                        className="flex items-center gap-1.5 px-4 py-1.5 bg-violet-600 text-white rounded-lg text-xs font-medium hover:bg-violet-700 disabled:opacity-50">
+                        <Search size={13} />
+                        {loading ? 'Cargando...' : 'Buscar'}
                     </button>
-                )}
-                {buscado && (
-                    <span className="ml-auto text-sm text-slate-500 font-medium">
-                        {facturas.length} {tab === 'emitidas' ? 'facturas emitidas' : 'facturas recibidas'}
-                    </span>
-                )}
+                    {buscado && (
+                        <span className="text-xs text-slate-500 font-medium ml-1">
+                            {facturas.length} {tab === 'emitidas' ? 'emitidas' : 'recibidas'}
+                        </span>
+                    )}
+                </div>
             </div>
 
-            {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-4 py-2">{error}</div>}
+            {error && <div className="mx-3 md:mx-6 mt-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded px-3 py-2">{error}</div>}
 
             {/* Table */}
             {buscado && (
-                <div className="bg-white border rounded-lg overflow-auto flex-1">
+                <div className="flex-1 overflow-auto bg-white">
                     <table className="text-xs w-max min-w-full">
                         <thead>
                             <tr>

@@ -16,16 +16,30 @@ const AuthContext = createContext<AuthState | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<UserMe | null>(null)
     const [loading, setLoading] = useState(true)
-    const [selectedLocal, setSelectedLocal] = useState<LocalInfo | null>(null)
+    const [selectedLocal, setSelectedLocalState] = useState<LocalInfo | null>(() => {
+        try {
+            const stored = sessionStorage.getItem('selected_local')
+            return stored ? JSON.parse(stored) : null
+        } catch { return null }
+    })
+
+    const setSelectedLocal = (local: LocalInfo | null) => {
+        setSelectedLocalState(local)
+        if (local) {
+            sessionStorage.setItem('selected_local', JSON.stringify(local))
+        } else {
+            sessionStorage.removeItem('selected_local')
+        }
+    }
 
     useEffect(() => {
-        const token = localStorage.getItem('access_token')
+        const token = sessionStorage.getItem('access_token')
         if (token) {
             api.get<UserMe>('/api/auth/me')
                 .then(({ data }) => setUser(data))
                 .catch(() => {
-                    localStorage.removeItem('access_token')
-                    localStorage.removeItem('refresh_token')
+                    sessionStorage.removeItem('access_token')
+                    sessionStorage.removeItem('refresh_token')
                 })
                 .finally(() => setLoading(false))
         } else {
@@ -35,21 +49,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (user?.locales?.length && !selectedLocal) {
+            // Si hay un local guardado que sea valido para este usuario, usarlo
+            const stored = sessionStorage.getItem('selected_local')
+            if (stored) {
+                try {
+                    const parsed: LocalInfo = JSON.parse(stored)
+                    const valid = user.locales.find(l => l.id === parsed.id)
+                    if (valid) { setSelectedLocal(valid); return }
+                } catch { /* ignore */ }
+            }
             setSelectedLocal(user.locales[0])
         }
-    }, [user, selectedLocal])
+    }, [user])
 
     async function login(email: string, password: string) {
         const { data } = await api.post('/api/auth/login', { email, password })
-        localStorage.setItem('access_token', data.access_token)
-        localStorage.setItem('refresh_token', data.refresh_token)
+        sessionStorage.setItem('access_token', data.access_token)
+        sessionStorage.setItem('refresh_token', data.refresh_token)
         const me = await api.get<UserMe>('/api/auth/me')
         setUser(me.data)
     }
 
     function logout() {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
+        sessionStorage.removeItem('access_token')
+        sessionStorage.removeItem('refresh_token')
+        sessionStorage.removeItem('selected_local')
         setUser(null)
         setSelectedLocal(null)
     }

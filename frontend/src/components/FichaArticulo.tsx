@@ -118,7 +118,7 @@ export default function FichaArticulo({ referencia, descripcion, initialAnio, on
     const isRectificativa = (doc: string) => doc.startsWith('RC') || doc.startsWith('R ')
 
     return (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 sm:p-4" onClick={onClose}>
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-7xl h-[96vh] flex flex-col overflow-hidden"
                 onClick={e => e.stopPropagation()}>
 
@@ -156,7 +156,7 @@ export default function FichaArticulo({ referencia, descripcion, initialAnio, on
                 ) : data && (
                     <div className="flex-1 overflow-y-auto">
                         {/* Top section: chart + KPIs */}
-                        <div className="grid grid-cols-2 gap-4 p-4 border-b border-slate-100">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3 md:p-4 border-b border-slate-100">
                             {/* Chart */}
                             <div className="border border-slate-200 rounded-lg p-3">
                                 <ResponsiveContainer width="100%" height={190}>
@@ -175,7 +175,7 @@ export default function FichaArticulo({ referencia, descripcion, initialAnio, on
                             </div>
 
                             {/* KPIs grid */}
-                            <div className="grid grid-cols-4 grid-rows-2 gap-2">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                 <KpiCard label="Ventas" value={`${fmt(data.kpis.ventas)} €`} color="text-blue-600" />
                                 <KpiCard label="Beneficio"
                                     value={`${fmt(data.kpis.beneficio)} €`}
@@ -202,14 +202,14 @@ export default function FichaArticulo({ referencia, descripcion, initialAnio, on
                         )}
 
                         {/* Tabs */}
-                        <div className="flex gap-0 border-b border-slate-200 px-4 pt-2 bg-white sticky top-0 z-10">
+                        <div className="flex gap-0 border-b border-slate-200 px-2 sm:px-4 pt-2 bg-white sticky top-0 z-10 overflow-x-auto">
                             {([
                                 { key: 'ventas', label: `Ventas (detalle) ${data.ventas_detalle.length}` },
                                 { key: 'compras', label: `Compras (detalle) ${data.compras_detalle.length}` },
                                 { key: 'descuentos', label: `Descuentos ${data.descuentos.length}` },
                             ] as { key: Tab; label: string }[]).map(t => (
                                 <button key={t.key} onClick={() => setTab(t.key)}
-                                    className={`px-4 py-1.5 text-xs font-medium border-b-2 transition-colors mr-1
+                                    className={`px-3 sm:px-4 py-1.5 text-xs font-medium border-b-2 transition-colors mr-1 whitespace-nowrap shrink-0
                                         ${tab === t.key ? 'border-purple-500 text-purple-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
                                     {t.label}
                                 </button>
@@ -367,7 +367,7 @@ export default function FichaArticulo({ referencia, descripcion, initialAnio, on
                             {docLoading && <div className="flex justify-center py-8"><div className="animate-spin h-6 w-6 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}
                             {!docLoading && docDetalle && (
                                 <div className="space-y-4">
-                                    <div className="grid grid-cols-4 gap-3 text-xs">
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                                         <div><span className="text-slate-400">Serie/Núm:</span> <span className="font-semibold">{docDetalle.cabecera.serie}-{docDetalle.cabecera.numero}</span></div>
                                         <div><span className="text-slate-400">Fecha:</span> <span className="font-semibold">{docDetalle.cabecera.fecha}</span></div>
                                         <div><span className="text-slate-400">{docModal.tipo === 'venta' ? 'Cliente' : 'Proveedor'}:</span> <span className="font-semibold truncate">{docDetalle.cabecera.nombre_tercero}</span></div>

@@ -4,7 +4,7 @@ Contabilidad – Libro IVA emitidas y recibidas.
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, get_empresa_from_local
 from app.database import get_session
 from app.models.app_models import Empresa, Usuario
 from app.services.pg_connection import get_pg_connection
@@ -12,24 +12,16 @@ from app.services.pg_connection import get_pg_connection
 router = APIRouter()
 
 
-def _get_empresa(user: Usuario, session: Session) -> Empresa:
-    if not user.empresa_id:
-        raise HTTPException(status_code=400, detail="Usuario sin empresa asignada")
-    empresa = session.get(Empresa, user.empresa_id)
-    if not empresa:
-        raise HTTPException(status_code=404, detail="Empresa no encontrada")
-    return empresa
-
 
 @router.get("/libro-iva")
 def libro_iva(
     tipo: str = Query("emitidas", description="emitidas|recibidas"),
     desde: str = Query(..., description="Fecha desde YYYY-MM-DD"),
     hasta: str = Query(..., description="Fecha hasta YYYY-MM-DD"),
+    empresa: Empresa = Depends(get_empresa_from_local),
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    empresa = _get_empresa(current_user, session)
     conn = None
     try:
         conn = get_pg_connection(empresa)
