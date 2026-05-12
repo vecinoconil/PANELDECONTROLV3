@@ -48,9 +48,16 @@ jobs:
             --project-dir=.
           chmod +x gradlew
 
+      - name: Create local.properties
+        working-directory: android-app
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          cat local.properties
+          ls -la "$ANDROID_HOME/build-tools/"
+
       - name: Build Debug APK
         working-directory: android-app
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: ./gradlew assembleDebug --no-daemon --stacktrace --info 2>&1 | tail -100
 
       - name: Copy APK to backend/downloads
         run: |
