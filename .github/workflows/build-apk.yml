@@ -13,7 +13,6 @@ jobs:
 
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout
@@ -27,37 +26,28 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Accept Android SDK licenses & install components
+      - name: Accept Android SDK licenses & install SDK 35
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
+            "platforms;android-35" \
+            "build-tools;35.0.1" \
             "platform-tools"
 
-      - name: Generate Gradle Wrapper JAR
-        working-directory: android-app
+      - name: Install Gradle 8.9
         run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip -O /tmp/gradle.zip
+          wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip -O /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /opt/gradle
-          chmod +x /opt/gradle/gradle-8.4/bin/gradle
-          mkdir -p gradle/wrapper
-          /opt/gradle/gradle-8.4/bin/gradle wrapper \
-            --gradle-version=8.4 \
-            --distribution-type=bin \
-            --project-dir=.
-          chmod +x gradlew
+          chmod +x /opt/gradle/gradle-8.9/bin/gradle
+          /opt/gradle/gradle-8.9/bin/gradle --version
 
       - name: Create local.properties
         working-directory: android-app
-        run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          cat local.properties
-          ls -la "$ANDROID_HOME/build-tools/"
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Build Debug APK
         working-directory: android-app
-        run: ./gradlew assembleDebug --no-daemon --stacktrace --info 2>&1 | tail -100
+        run: /opt/gradle/gradle-8.9/bin/gradle assembleDebug --no-daemon --stacktrace
 
       - name: Copy APK to backend/downloads
         run: |
