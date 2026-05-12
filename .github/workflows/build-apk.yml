@@ -11,6 +11,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,17 +27,25 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK licenses & install components
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "platform-tools"
 
-      - name: Generate Gradle Wrapper
+      - name: Generate Gradle Wrapper JAR
         working-directory: android-app
         run: |
-          # Instalar gradle para generar el wrapper
           wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip -O /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /opt/gradle
-          export PATH="/opt/gradle/gradle-8.4/bin:$PATH"
-          gradle wrapper --gradle-version=8.4 --distribution-type=bin
+          chmod +x /opt/gradle/gradle-8.4/bin/gradle
+          mkdir -p gradle/wrapper
+          /opt/gradle/gradle-8.4/bin/gradle wrapper \
+            --gradle-version=8.4 \
+            --distribution-type=bin \
+            --project-dir=.
           chmod +x gradlew
 
       - name: Build Debug APK
