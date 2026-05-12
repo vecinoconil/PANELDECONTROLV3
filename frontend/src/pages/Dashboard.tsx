@@ -4,13 +4,13 @@ import { api } from '../api/client'
 import {
     TrendingUp, TrendingDown,
     ShoppingCart, CreditCard, Wallet, Users, Package,
-    Filter, RefreshCw, ChevronDown, ChevronUp, X, Receipt, Clock
+    Filter, RefreshCw, ChevronDown, ChevronUp, X, Receipt, Search
 } from 'lucide-react'
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, Legend
 } from 'recharts'
-import type { CuadroMandosData, ProductoFamilia, VencimientosResumen, FacturaDoc, VencimientoDetalle, DocDetalle, FraPteCobro, CobrosResumen } from '../types'
+import type { CuadroMandosData, ProductoFamilia, FacturaDoc, VencimientoDetalle, DocDetalle, FraPteCobro, CobrosResumen } from '../types'
 import FichaCliente from '../components/FichaCliente'
 import FichaProveedor from '../components/FichaProveedor'
 
@@ -43,6 +43,11 @@ export default function Dashboard() {
     const seriesMobileRef = useRef<HTMLDivElement>(null)
     const [filtersOpen, setFiltersOpen] = useState(false)
 
+    // Vencimientos modal series filter (solo cobros/clientes)
+    const [vtoSeries, setVtoSeries] = useState<string[]>([])
+    const [vtoSeriesOpen, setVtoSeriesOpen] = useState(false)
+    const vtoSeriesRef = useRef<HTMLDivElement>(null)
+
     // Familia modal state
     const [familiaModal, setFamiliaModal] = useState<string | null>(null)
     const [familiaProductos, setFamiliaProductos] = useState<ProductoFamilia[]>([])
@@ -55,10 +60,10 @@ export default function Dashboard() {
     // Vencimientos date filter
     const [vtoDesde, setVtoDesde] = useState('')
     const [vtoHasta, setVtoHasta] = useState('')
-    const [vtoData, setVtoData] = useState<VencimientosResumen | null>(null)
+    const [vtoTab, setVtoTab] = useState<0 | 1>(0)
 
     // Detail modals
-    const [detailModal, setDetailModal] = useState<{ type: 'cliente' | 'proveedor' | 'vto'; title: string } | null>(null)
+    const [detailModal, setDetailModal] = useState<{ type: 'cliente' | 'proveedor'; title: string } | null>(null)
     const [detailLoading, setDetailLoading] = useState(false)
     const [facturasDetalle, setFacturasDetalle] = useState<FacturaDoc[]>([])
     const [vtosDetalle, setVtosDetalle] = useState<VencimientoDetalle[]>([])
@@ -104,6 +109,13 @@ export default function Dashboard() {
     const [cobrosResumen, setCobrosResumen] = useState<CobrosResumen | null>(null)
     const [cobrosModal, setCobrosModal] = useState<{ open: boolean; periodo: 'hoy' | 'semana' | 'mes' } | null>(null)
 
+    // Búsqueda de clientes
+    const [clienteSearch, setClienteSearch] = useState('')
+    const [clienteSearchOpen, setClienteSearchOpen] = useState(false)
+    const [clienteSearchResults, setClienteSearchResults] = useState<{ codigo: number; nombre: string }[]>([])
+    const [clienteSearchLoading, setClienteSearchLoading] = useState(false)
+    const clienteSearchRef = useRef<HTMLDivElement>(null)
+
     // Ficha Cliente
     const [fichaCliente, setFichaCliente] = useState<{ codigo: number; nombre: string } | null>(null)
 
@@ -124,6 +136,17 @@ export default function Dashboard() {
             const inDesktop = seriesRef.current?.contains(e.target as Node)
             const inMobile = seriesMobileRef.current?.contains(e.target as Node)
             if (!inDesktop && !inMobile) setSeriesOpen(false)
+        }
+        document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [])
+
+    // Close cliente search dropdown on outside click
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (!clienteSearchRef.current?.contains(e.target as Node)) {
+                setClienteSearchOpen(false)
+            }
         }
         document.addEventListener('mousedown', handler)
         return () => document.removeEventListener('mousedown', handler)
@@ -160,6 +183,15 @@ export default function Dashboard() {
         return () => document.removeEventListener('mousedown', handler)
     }, [])
 
+    // Close vto series dropdown on outside click
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (vtoSeriesRef.current && !vtoSeriesRef.current.contains(e.target as Node)) setVtoSeriesOpen(false)
+        }
+        document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [])
+
     const fetchData = useCallback(async () => {
         setLoading(true)
         setError('')
@@ -179,7 +211,6 @@ export default function Dashboard() {
             ])
             setData(d)
             if (cobrosResp) setCobrosResumen(cobrosResp.data)
-            setVtoData(null)
             setVtoDesde('')
             setVtoHasta('')
         } catch (e: any) {
@@ -208,21 +239,6 @@ export default function Dashboard() {
         finally { setFamiliaLoading(false) }
     }
 
-    // Fetch vencimientos with date filter
-    const fetchVencimientos = async () => {
-        try {
-            const params: Record<string, unknown> = {}
-            if (vtoDesde) params.fecha_desde = vtoDesde
-            if (vtoHasta) params.fecha_hasta = vtoHasta
-            if (selectedSeries.length > 0) params.series = selectedSeries
-            const { data: d } = await api.get<VencimientosResumen>('/api/dashboard/vencimientos-resumen', {
-                params,
-                paramsSerializer: { indexes: null },
-            })
-            setVtoData(d)
-        } catch { /* ignore */ }
-    }
-
     // Open client ficha modal
     const openCliente = (cli_codigo: number, cli_nombre: string) => {
         setFichaCliente({ codigo: cli_codigo, nombre: cli_nombre })
@@ -233,24 +249,39 @@ export default function Dashboard() {
         setFichaProveedor({ codigo: pro_codigo, nombre: pro_nombre })
     }
 
-    // Open vencimientos detail modal
-    const openVencimientos = async (tipo: 0 | 1, soloPend?: boolean) => {
+    // Load vencimientos data into vtosDetalle
+    const openVencimientos = async (tipo: 0 | 1, soloPend?: boolean, _unused = true, fechaDesde?: string, fechaHasta?: string, seriesOverride?: string[]) => {
         const sp = soloPend ?? vtoPendientes
-        setDetailModal({ type: 'vto', title: tipo === 0 ? 'Vencimientos Clientes' : 'Facturas Pendientes de Pago' })
         setDetailLoading(true)
         setVtosDetalle([])
         setVtoSearch('')
         try {
-            const p: Record<string, unknown> = { tipo, solo_pendientes: sp, anio }
-            if (vtoDesde) p.fecha_desde = vtoDesde
-            if (vtoHasta) p.fecha_hasta = vtoHasta
-            if (selectedSeries.length > 0) p.series = selectedSeries
+            const p: Record<string, unknown> = { tipo, solo_pendientes: sp }
+            const fd = fechaDesde ?? vtoDesde
+            const fh = fechaHasta ?? vtoHasta
+            if (fd) p.fecha_desde = fd
+            if (fh) p.fecha_hasta = fh
+            const series = seriesOverride ?? (tipo === 0 ? vtoSeries : [])
+            if (series.length > 0) p.series = series
             const { data: d } = await api.get<{ vencimientos: VencimientoDetalle[] }>('/api/dashboard/vencimientos-detalle', {
                 params: p, paramsSerializer: { indexes: null },
             })
             setVtosDetalle(d.vencimientos)
         } catch { setVtosDetalle([]) }
         finally { setDetailLoading(false) }
+    }
+
+    // Open vto modal (with tabs)
+    const openVtoModal = (tab: 0 | 1 = 0) => {
+        const desde = `${anio}-01-01`
+        const hasta = `${anio}-12-31`
+        setVtoDesde(desde)
+        setVtoHasta(hasta)
+        setVtoTab(tab)
+        setVtoSeries([])
+        setVtoSeriesOpen(false)
+        setVtoModalOpen(true)
+        openVencimientos(tab, undefined, true, desde, hasta, [])
     }
 
     // Open IVA trimestral modal
@@ -389,109 +420,21 @@ export default function Dashboard() {
                 </div>
             )}
 
-            {/* Detail Modal (Clientes/Proveedores/Vencimientos) */}
+            {/* Detail Modal (Facturas Clientes/Proveedores) */}
             {detailModal && (
                 <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setDetailModal(null)}>
                     <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
                             <h2 className="text-sm font-bold text-slate-700">
-                                {detailModal.type === 'cliente' ? 'Facturas — ' : detailModal.type === 'proveedor' ? 'Facturas — ' : ''}
-                                {detailModal.title}
+                                Facturas — {detailModal.title}
                             </h2>
                             <button onClick={() => setDetailModal(null)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
                         </div>
                         <div className="flex-1 flex flex-col min-h-0">
-                            {detailModal.type === 'vto' && (
-                                <div className="flex items-center gap-3 px-4 pt-3 pb-2 border-b bg-slate-50">
-                                    <input
-                                        type="text"
-                                        placeholder="Buscar proveedor / cliente..."
-                                        value={vtoSearch}
-                                        onChange={e => setVtoSearch(e.target.value)}
-                                        className="flex-1 border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-brand"
-                                        autoFocus
-                                    />
-                                    <label className="flex items-center gap-1.5 cursor-pointer select-none whitespace-nowrap">
-                                        <input
-                                            type="checkbox"
-                                            checked={vtoPendientes}
-                                            onChange={e => {
-                                                const v = e.target.checked
-                                                setVtoPendientes(v)
-                                                const tipo = detailModal.title === 'Vencimientos Clientes' ? 0 : 1
-                                                openVencimientos(tipo, v)
-                                            }}
-                                            className="accent-red-500"
-                                        />
-                                        <span className="text-xs font-medium text-slate-600">Pendientes</span>
-                                    </label>
-                                    {!detailLoading && vtosDetalle.length > 0 && (() => {
-                                        const vis = vtoSearch
-                                            ? vtosDetalle.filter(v => v.nombre.toLowerCase().includes(vtoSearch.toLowerCase()))
-                                            : vtosDetalle
-                                        return (
-                                            <span className="text-xs font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded whitespace-nowrap">
-                                                {fmt(vis.reduce((a, v) => a + v.pendiente, 0))} € ({vis.length})
-                                            </span>
-                                        )
-                                    })()}
-                                </div>
-                            )}
                             <div className="overflow-auto flex-1 p-4">
                             {detailLoading ? (
                                 <div className="text-center text-slate-400 py-8">Cargando...</div>
-                            ) : detailModal.type === 'vto' ? (() => {
-                                const filtered = vtoSearch
-                                    ? vtosDetalle.filter(v => v.nombre.toLowerCase().includes(vtoSearch.toLowerCase()))
-                                    : vtosDetalle
-                                return (
-                                <table className="w-full text-xs">
-                                    <thead>
-                                        <tr className="border-b border-slate-200 text-slate-500">
-                                            <th className="text-left py-1.5 pr-2">Nombre</th>
-                                            <th className="text-left py-1.5 pr-2">Serie</th>
-                                            <th className="text-right py-1.5 pr-2">Número</th>
-                                            <th className="text-left py-1.5 pr-2">Fecha</th>
-                                            <th className="text-right py-1.5 pr-2">Total Fra.</th>
-                                            <th className="text-right py-1.5 pr-2 text-red-600">Pendiente</th>
-                                            <th className="text-center py-1.5">Estado</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {filtered.map((v, i) => (
-                                            <tr key={i} className="border-b border-slate-50 hover:bg-red-50 cursor-pointer"
-                                                onClick={() => openDocumento(v.id, detailModal.title === 'Vencimientos Clientes' ? 'venta' : 'compra', `${v.serie}/${String(v.numero).padStart(6, '0')}`)}>
-                                                <td className="py-1 pr-2 truncate max-w-[180px]" title={v.nombre}>{v.nombre}</td>
-                                                <td className="py-1 pr-2">{v.serie}</td>
-                                                <td className="text-right py-1 pr-2">{v.numero}</td>
-                                                <td className="py-1 pr-2">{v.fecha}</td>
-                                                <td className="text-right py-1 pr-2 text-slate-500">{fmt(v.total_fra)} €</td>
-                                                <td className="text-right py-1 pr-2 font-semibold text-red-600">{fmt(v.pendiente)} €</td>
-                                                <td className="text-center py-1">
-                                                    {v.pendiente < 0
-                                                        ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-700">Abono</span>
-                                                        : v.pendiente === 0
-                                                            ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Pagado</span>
-                                                            : v.pendiente < v.total_fra
-                                                                ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">A Cuenta</span>
-                                                                : <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Pendiente</span>}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                    {filtered.length > 0 && (
-                                        <tfoot>
-                                            <tr className="font-bold border-t border-slate-300">
-                                                <td colSpan={4} className="py-1.5 pr-2">TOTAL ({filtered.length} fras.)</td>
-                                                <td className="text-right py-1.5 pr-2 text-slate-500">{fmt(filtered.reduce((a, v) => a + v.total_fra, 0))} €</td>
-                                                <td className="text-right py-1.5 text-red-600">{fmt(filtered.reduce((a, v) => a + v.pendiente, 0))} €</td>
-                                                <td />
-                                            </tr>
-                                        </tfoot>
-                                    )}
-                                </table>
-                                )
-                            })() : (
+                            ) : (
                                 <table className="w-full text-xs">
                                     <thead>
                                         <tr className="border-b border-slate-200 text-slate-500">
@@ -547,46 +490,160 @@ export default function Dashboard() {
                 </div>
             )}
 
-            {/* Vencimientos Pendientes Modal */}
-            {vtoModalOpen && data && (
+            {/* Vencimientos Modal — pestañas Cobros / Pagos */}
+            {vtoModalOpen && (
                 <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setVtoModalOpen(false)}>
-                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                        {/* Header */}
                         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200">
                             <h2 className="text-sm font-bold text-slate-700">Vencimientos Pendientes</h2>
                             <button onClick={() => setVtoModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
                         </div>
-                        <div className="p-5">
-                            <div className="flex gap-2 mb-4">
-                                <input type="date" value={vtoDesde} onChange={e => setVtoDesde(e.target.value)}
-                                    className="input !py-1.5 text-xs flex-1" placeholder="Desde" />
-                                <input type="date" value={vtoHasta} onChange={e => setVtoHasta(e.target.value)}
-                                    className="input !py-1.5 text-xs flex-1" placeholder="Hasta" />
-                                <button onClick={fetchVencimientos} className="btn-primary !py-1.5 !px-3 text-xs">
-                                    <Filter className="w-3.5 h-3.5" />
+                        {/* Pestañas + filtros */}
+                        <div className="px-4 pt-3 pb-2 border-b bg-slate-50 flex flex-col gap-2">
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={() => { setVtoTab(0); openVencimientos(0, undefined, true) }}
+                                    className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${vtoTab === 0 ? 'bg-amber-500 text-white shadow' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
+                                >
+                                    Cobros (Clientes)
+                                </button>
+                                <button
+                                    onClick={() => { setVtoTab(1); openVencimientos(1, undefined, true) }}
+                                    className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${vtoTab === 1 ? 'bg-red-500 text-white shadow' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
+                                >
+                                    Pagos (Proveedores)
                                 </button>
                             </div>
-                            {vtoData && (
-                                <div className="text-[10px] text-slate-400 mb-3 italic">Filtrado por fechas</div>
-                            )}
-                            <div className="space-y-3">
-                                <div className="flex justify-between text-sm cursor-pointer hover:bg-slate-50 rounded px-2 -mx-2 py-1.5" onClick={() => openVencimientos(0)}>
-                                    <span className="text-slate-600">Pte. Cobro (clientes){vtoData ? ` (${vtoData.clientes_count})` : ''}</span>
-                                    <span className="font-semibold text-amber-600">{fmt((vtoData ?? data.vencimientos).clientes)} €</span>
-                                </div>
-                                <div className="flex justify-between text-sm cursor-pointer hover:bg-slate-50 rounded px-2 -mx-2 py-1.5" onClick={() => openVencimientos(1)}>
-                                    <span className="text-slate-600">Pte. Pago (proveedores){vtoData ? ` (${vtoData.proveedores_count})` : ''}</span>
-                                    <span className="font-semibold text-red-600">{fmt((vtoData ?? data.vencimientos).proveedores)} €</span>
-                                </div>
-                                <div className="border-t border-slate-200 pt-3 flex justify-between text-sm">
-                                    <span className="text-slate-600 font-medium">Diferencia</span>
-                                    <span className={`font-bold ${(vtoData ?? data.vencimientos).clientes - (vtoData ?? data.vencimientos).proveedores >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                        {fmt((vtoData ?? data.vencimientos).clientes - (vtoData ?? data.vencimientos).proveedores)} €
-                                    </span>
-                                </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <input type="date" value={vtoDesde} onChange={e => setVtoDesde(e.target.value)}
+                                    className="input !py-1.5 text-xs w-36" />
+                                <input type="date" value={vtoHasta} onChange={e => setVtoHasta(e.target.value)}
+                                    className="input !py-1.5 text-xs w-36" />
+                                {/* Multifiltro series — solo en cobros/clientes */}
+                                {vtoTab === 0 && data?.filtros.series && (
+                                    <div className="relative" ref={vtoSeriesRef}>
+                                        <button
+                                            onClick={() => setVtoSeriesOpen(o => !o)}
+                                            className="text-xs px-2 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 whitespace-nowrap"
+                                        >
+                                            {vtoSeries.length === 0 ? 'Todas las series' : vtoSeries.join(', ')} ▾
+                                        </button>
+                                        {vtoSeriesOpen && (
+                                            <div className="absolute top-full left-0 mt-1 bg-white border border-slate-200 rounded shadow-lg z-20 max-h-48 overflow-auto min-w-[150px]">
+                                                {data.filtros.series.map(s => (
+                                                    <label key={s} className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-50 cursor-pointer text-xs">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={vtoSeries.includes(s)}
+                                                            onChange={() => {
+                                                                const next = vtoSeries.includes(s) ? vtoSeries.filter(x => x !== s) : [...vtoSeries, s]
+                                                                setVtoSeries(next)
+                                                            }}
+                                                            className="rounded"
+                                                        />
+                                                        {s}
+                                                    </label>
+                                                ))}
+                                                {vtoSeries.length > 0 && (
+                                                    <button onClick={() => setVtoSeries([])} className="w-full text-left px-3 py-1.5 text-[10px] text-red-500 hover:bg-red-50 border-t border-slate-100">
+                                                        Limpiar selección
+                                                    </button>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                <button onClick={() => openVencimientos(vtoTab, undefined, true)} className="btn-primary !py-1.5 !px-3 text-xs">
+                                    <Filter className="w-3.5 h-3.5" />
+                                </button>
+                                <input
+                                    type="text"
+                                    placeholder="Buscar..."
+                                    value={vtoSearch}
+                                    onChange={e => setVtoSearch(e.target.value)}
+                                    className="border rounded px-3 py-1.5 text-xs focus:outline-none focus:border-blue-400 flex-1 min-w-[120px]"
+                                />
+                                <label className="flex items-center gap-1.5 cursor-pointer select-none whitespace-nowrap">
+                                    <input
+                                        type="checkbox"
+                                        checked={vtoPendientes}
+                                        onChange={e => {
+                                            const v = e.target.checked
+                                            setVtoPendientes(v)
+                                            openVencimientos(vtoTab, v, true)
+                                        }}
+                                        className="accent-red-500"
+                                    />
+                                    <span className="text-xs font-medium text-slate-600">Solo pendientes</span>
+                                </label>
+                                {!detailLoading && vtosDetalle.length > 0 && (() => {
+                                    const vis = vtoSearch
+                                        ? vtosDetalle.filter(v => v.nombre.toLowerCase().includes(vtoSearch.toLowerCase()))
+                                        : vtosDetalle
+                                    return (
+                                        <span className={`text-xs font-semibold px-2 py-0.5 rounded whitespace-nowrap ${vtoTab === 0 ? 'text-amber-600 bg-amber-50' : 'text-red-600 bg-red-50'}`}>
+                                            {fmt(vis.reduce((a, v) => a + v.pendiente, 0))} € ({vis.length})
+                                        </span>
+                                    )
+                                })()}
                             </div>
-                            <p className="text-[10px] text-slate-400 mt-4 italic">
-                                Haz clic en cada línea para ver el detalle de vencimientos
-                            </p>
+                        </div>
+                        {/* Tabla */}
+                        <div className="overflow-auto flex-1 p-4">
+                            {detailLoading ? (
+                                <div className="text-center text-slate-400 py-8">Cargando...</div>
+                            ) : (() => {
+                                const filtered = vtoSearch
+                                    ? vtosDetalle.filter(v => v.nombre.toLowerCase().includes(vtoSearch.toLowerCase()))
+                                    : vtosDetalle
+                                if (filtered.length === 0) return <div className="text-center text-slate-400 py-8 text-sm">No hay resultados</div>
+                                return (
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="border-b border-slate-200 text-slate-500">
+                                                <th className="text-left py-1.5 pr-2">Nombre</th>
+                                                <th className="text-left py-1.5 pr-2">Serie</th>
+                                                <th className="text-right py-1.5 pr-2">Número</th>
+                                                <th className="text-left py-1.5 pr-2">Fecha Fra.</th>
+                                                <th className="text-right py-1.5 pr-2">Total Fra.</th>
+                                                <th className={`text-right py-1.5 pr-2 ${vtoTab === 0 ? 'text-amber-600' : 'text-red-600'}`}>Pendiente</th>
+                                                <th className="text-center py-1.5">Estado</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filtered.map((v, i) => (
+                                                <tr key={i} className={`border-b border-slate-50 cursor-pointer ${vtoTab === 0 ? 'hover:bg-amber-50' : 'hover:bg-red-50'}`}
+                                                    onClick={() => openDocumento(v.id, vtoTab === 0 ? 'venta' : 'compra', `${v.serie}/${String(v.numero).padStart(6, '0')}`)}>
+                                                    <td className="py-1 pr-2 truncate max-w-[180px]" title={v.nombre}>{v.nombre}</td>
+                                                    <td className="py-1 pr-2">{v.serie}</td>
+                                                    <td className="text-right py-1 pr-2">{v.numero}</td>
+                                                    <td className="py-1 pr-2">{v.fecha}</td>
+                                                    <td className="text-right py-1 pr-2 text-slate-500">{fmt(v.total_fra)} €</td>
+                                                    <td className={`text-right py-1 pr-2 font-semibold ${vtoTab === 0 ? 'text-amber-600' : 'text-red-600'}`}>{fmt(v.pendiente)} €</td>
+                                                    <td className="text-center py-1">
+                                                        {v.pendiente < 0
+                                                            ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-700">Abono</span>
+                                                            : v.pendiente === 0
+                                                                ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-green-100 text-green-700">Pagado</span>
+                                                                : v.pendiente < v.total_fra
+                                                                    ? <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">A Cuenta</span>
+                                                                    : <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">Pendiente</span>}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                        <tfoot>
+                                            <tr className="font-bold border-t border-slate-300">
+                                                <td colSpan={4} className="py-1.5 pr-2">TOTAL ({filtered.length} fras.)</td>
+                                                <td className="text-right py-1.5 pr-2 text-slate-500">{fmt(filtered.reduce((a, v) => a + v.total_fra, 0))} €</td>
+                                                <td className={`text-right py-1.5 pr-2 ${vtoTab === 0 ? 'text-amber-600' : 'text-red-600'}`}>{fmt(filtered.reduce((a, v) => a + v.pendiente, 0))} €</td>
+                                                <td />
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                )
+                            })()}
                         </div>
                     </div>
                 </div>
@@ -860,6 +917,62 @@ export default function Dashboard() {
                         </select>
                     </div>
 
+                    {/* Búsqueda de clientes */}
+                    <div className="relative" ref={clienteSearchRef}>
+                        <button
+                            onClick={() => setClienteSearchOpen(o => !o)}
+                            title="Buscar cliente"
+                            className="bg-white text-blue-600 font-semibold py-1.5 px-3 text-sm rounded-lg flex items-center gap-1.5 hover:bg-blue-50 transition-colors"
+                        >
+                            <Search className="w-4 h-4" />
+                            <span className="hidden sm:inline">Cliente</span>
+                        </button>
+                        {clienteSearchOpen && (
+                            <div className="absolute right-0 top-full mt-1 w-72 bg-white rounded-xl shadow-xl border border-slate-200 z-50 p-2">
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    placeholder="Nombre del cliente..."
+                                    value={clienteSearch}
+                                    onChange={async e => {
+                                        const v = e.target.value
+                                        setClienteSearch(v)
+                                        if (v.length < 2) { setClienteSearchResults([]); return }
+                                        setClienteSearchLoading(true)
+                                        try {
+                                            const empresaId = (user as any)?.empresa_id
+                                            const { data: d } = await api.get('/api/dashboard/buscar-clientes', { params: { q: v, empresa_id: empresaId } })
+                                            setClienteSearchResults(d)
+                                        } catch { setClienteSearchResults([]) }
+                                        finally { setClienteSearchLoading(false) }
+                                    }}
+                                    className="w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                />
+                                {clienteSearchLoading && <p className="text-xs text-slate-400 mt-2 px-1">Buscando...</p>}
+                                <ul className="mt-1 max-h-60 overflow-auto">
+                                    {clienteSearchResults.map(c => (
+                                        <li key={c.codigo}>
+                                            <button
+                                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-blue-50 text-slate-700"
+                                                onClick={() => {
+                                                    setFichaCliente({ codigo: c.codigo, nombre: c.nombre })
+                                                    setClienteSearchOpen(false)
+                                                    setClienteSearch('')
+                                                    setClienteSearchResults([])
+                                                }}
+                                            >
+                                                {c.nombre}
+                                            </button>
+                                        </li>
+                                    ))}
+                                    {!clienteSearchLoading && clienteSearch.length >= 2 && clienteSearchResults.length === 0 && (
+                                        <li className="text-xs text-slate-400 px-3 py-2">Sin resultados</li>
+                                    )}
+                                </ul>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Botones lado derecho */}
                     <div className="flex items-center gap-2 ml-auto">
                         <button onClick={fetchData} className="bg-white text-blue-600 font-semibold py-1.5 px-3 text-sm rounded-lg flex items-center gap-1.5 hover:bg-blue-50 transition-colors">
@@ -869,10 +982,6 @@ export default function Dashboard() {
                         <button onClick={() => openIvaTrimestral()} className="hidden md:flex bg-blue-500 text-white font-semibold py-1.5 px-3 text-sm rounded-lg items-center gap-1.5 hover:bg-blue-400 transition-colors border border-blue-400">
                             <Receipt className="w-4 h-4" />
                             <span className="hidden lg:inline">IVA Trim.</span>
-                        </button>
-                        <button onClick={() => setVtoModalOpen(true)} className="hidden md:flex bg-blue-500 text-white font-semibold py-1.5 px-3 text-sm rounded-lg items-center gap-1.5 hover:bg-blue-400 transition-colors border border-blue-400">
-                            <Clock className="w-4 h-4" />
-                            <span className="hidden lg:inline">Vtos.</span>
                         </button>
                         {/* Mobile: toggle filtros */}
                         <button onClick={() => setFiltersOpen(o => !o)}
@@ -938,11 +1047,6 @@ export default function Dashboard() {
                                 <Receipt className="w-4 h-4" />
                                 IVA Trimestral
                             </button>
-                            <button onClick={() => { setVtoModalOpen(true); setFiltersOpen(false) }}
-                                className="bg-blue-500/80 text-white font-semibold py-2 text-sm rounded-lg flex items-center justify-center gap-1.5 hover:bg-blue-400 border border-blue-400">
-                                <Clock className="w-4 h-4" />
-                                Vtos. Pendientes
-                            </button>
                         </div>
                     </div>
                 )}
@@ -999,8 +1103,8 @@ export default function Dashboard() {
                                     </div>
                                 ) : undefined}
                             />
-                            <KPICard icon={<Wallet className="w-4 h-4" />} label="Pte. Cobro" value={fmt(data.vencimientos.clientes)} color="text-amber-600" sub={data.vencimientos.clientes_otros_anios > 0 ? `Otros años: ${fmt(data.vencimientos.clientes_otros_anios)} €` : undefined} onClick={() => openPteCobro()} />
-                            <KPICard icon={<TrendingDown className="w-4 h-4" />} label="Pte. Pago" value={fmt(data.vencimientos.proveedores)} color="text-red-600" sub={data.vencimientos.proveedores_otros_anios > 0 ? `Otros años: ${fmt(data.vencimientos.proveedores_otros_anios)} €` : undefined} onClick={() => openVencimientos(1)} />
+                            <KPICard icon={<Wallet className="w-4 h-4" />} label="Pte. Cobro" value={fmt(data.vencimientos.clientes)} color="text-amber-600" sub={data.vencimientos.clientes_otros_anios > 0 ? `Otros años: ${fmt(data.vencimientos.clientes_otros_anios)} €` : undefined} onClick={() => openVtoModal(0)} />
+                            <KPICard icon={<TrendingDown className="w-4 h-4" />} label="Pte. Pago" value={fmt(data.vencimientos.proveedores)} color="text-red-600" sub={data.vencimientos.proveedores_otros_anios > 0 ? `Otros años: ${fmt(data.vencimientos.proveedores_otros_anios)} €` : undefined} onClick={() => openVtoModal(1)} />
                         </div>
 
                         {/* Vencimientos Modal */}

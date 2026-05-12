@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../api/client'
-import { X, ChevronRight, ChevronDown, AlertTriangle, FileText, ShoppingBag, ClipboardList, ScrollText, CheckCircle } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext'
+import { X, ChevronRight, ChevronDown, AlertTriangle, FileText, ShoppingBag, ClipboardList, ScrollText, CheckCircle, Globe, Copy, Check } from 'lucide-react'
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, Legend
@@ -39,6 +40,10 @@ interface Props {
 }
 
 export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClose }: Props) {
+    const { user } = useAuth()
+    const canPortal = (user as any)?.rol === 'superadmin' || (user as any)?.rol === 'gerente'
+    const empresaId = (user as any)?.empresa_id as number | undefined
+
     const [anio, setAnio] = useState(initialAnio)
     const [data, setData] = useState<FichaClienteData | null>(null)
     const [loading, setLoading] = useState(true)
@@ -57,6 +62,13 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
 
     // TOP productos año selector
     const [topAnio, setTopAnio] = useState(initialAnio)
+
+    // Portal de clientes
+    const [portalModal, setPortalModal] = useState(false)
+    const [portalUrl, setPortalUrl] = useState<string | null>(null)
+    const [portalLoading, setPortalLoading] = useState(false)
+    const [portalError, setPortalError] = useState('')
+    const [copied, setCopied] = useState(false)
 
     const fetchData = useCallback(async (yr: number) => {
         setLoading(true)
@@ -95,6 +107,31 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
         } catch { setContratos([]) }
         finally { setContratosLoading(false) }
     }, [cliCodigo, contratos])
+
+    const generarEnlacePortal = async () => {
+        if (!empresaId) return
+        setPortalLoading(true)
+        setPortalError('')
+        setPortalUrl(null)
+        try {
+            const { data } = await api.get('/api/portal/generar-token', {
+                params: { empresa_id: empresaId, cli_codigo: cliCodigo },
+            })
+            const base = window.location.origin
+            setPortalUrl(`${base}/portal/${data.token}`)
+        } catch (e: any) {
+            setPortalError(e.response?.data?.detail || 'Error generando enlace')
+        } finally {
+            setPortalLoading(false)
+        }
+    }
+
+    const copyUrl = async () => {
+        if (!portalUrl) return
+        await navigator.clipboard.writeText(portalUrl)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+    }
 
     const openDocumento = async (docId: number, titulo: string) => {
         setDocModal({ tipo: 'venta', docId, titulo })
@@ -191,6 +228,16 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
                                 <option key={y} value={y}>{y}</option>
                             ))}
                         </select>
+                        {canPortal && empresaId && (
+                            <button
+                                onClick={() => { setPortalModal(true); generarEnlacePortal() }}
+                                title="Generar enlace del portal para este cliente"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-medium transition-colors"
+                            >
+                                <Globe className="w-3.5 h-3.5" />
+                                Portal
+                            </button>
+                        )}
                         <button onClick={onClose} className="p-1.5 hover:bg-slate-200 rounded-full" title="Cerrar"><X size={18} /></button>
                     </div>
                 </div>
@@ -597,6 +644,64 @@ export default function FichaCliente({ cliCodigo, cliNombre, initialAnio, onClos
                                     </div>
                                 )}
                             </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* ═══ Modal Portal de Clientes ═══ */}
+                {portalModal && (
+                    <div className="fixed inset-0 bg-black/40 z-[80] flex items-center justify-center p-4">
+                        <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2">
+                                    <Globe className="w-5 h-5 text-blue-600" />
+                                    <h3 className="font-bold text-slate-700">Portal de facturas</h3>
+                                </div>
+                                <button onClick={() => { setPortalModal(false); setPortalUrl(null); setPortalError('') }} className="p-1 hover:bg-slate-200 rounded-full"><X size={16} /></button>
+                            </div>
+                            <p className="text-sm text-slate-500 mb-4">
+                                Enlace para que <strong>{cliNombre}</strong> consulte sus facturas sin necesidad de contraseña (caduca en 90 días).
+                            </p>
+                            {portalLoading && (
+                                <div className="flex justify-center py-6">
+                                    <div className="animate-spin h-6 w-6 border-4 border-blue-500 border-t-transparent rounded-full" />
+                                </div>
+                            )}
+                            {portalError && (
+                                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+                                    {portalError}
+                                </div>
+                            )}
+                            {portalUrl && (
+                                <div className="space-y-3">
+                                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 font-mono text-xs break-all text-slate-700">
+                                        {portalUrl}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={copyUrl}
+                                            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${copied ? 'bg-green-100 text-green-700' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                                        >
+                                            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                            {copied ? 'Copiado' : 'Copiar enlace'}
+                                        </button>
+                                        <button
+                                            onClick={() => window.open(portalUrl, '_blank')}
+                                            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+                                        >
+                                            <Globe className="w-4 h-4" />
+                                            Abrir
+                                        </button>
+                                        <button
+                                            onClick={() => { generarEnlacePortal() }}
+                                            className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs text-slate-500 hover:bg-slate-100 transition-colors"
+                                            title="Regenerar enlace"
+                                        >
+                                            Regenerar
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

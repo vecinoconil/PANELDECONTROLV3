@@ -38,6 +38,19 @@ class Local(SQLModel, table=True):
     tipo: str = Field(default="definitiva", max_length=20)  # prueba | definitiva
     fecha_alta: Optional[datetime] = Field(default_factory=datetime.utcnow)
     fecha_definitiva: Optional[datetime] = Field(default=None)
+    asistente_ia: bool = Field(default=False)
+    # SMTP outgoing mail config
+    smtp_host: Optional[str] = Field(default=None, max_length=200)
+    smtp_port: int = Field(default=465)
+    smtp_user: Optional[str] = Field(default=None, max_length=200)
+    smtp_password: Optional[str] = Field(default=None, max_length=200)
+    smtp_from_name: Optional[str] = Field(default=None, max_length=200)
+    # Document format for email attachments
+    formato_doc: str = Field(default='a4_basico_logo_izq', max_length=50)
+    # Customer invoice portal
+    portal_activo: bool = Field(default=False)
+    # Custom FastReport template (.frx) path for this local
+    frx_factura: Optional[str] = Field(default=None, max_length=500)
 
 
 class Usuario(SQLModel, table=True):
@@ -62,7 +75,9 @@ class Usuario(SQLModel, table=True):
     almacen_autoventa: Optional[int] = Field(default=None)  # almacen por defecto para documentos autoventa
     fpago_autoventa: Optional[int] = Field(default=None)  # forma de pago predeterminada en cobros autoventa
     solo_clientes_agente: bool = Field(default=False)  # ver solo clientes asignados a su agente
+    precargar_historial_autoventa: bool = Field(default=True)  # precargar ventas 90 días al seleccionar cliente
     caja_reparto: Optional[int] = Field(default=None)  # caja donde van cobros del reparto
+    paper_width_impresora: int = Field(default=80)  # ancho papel impresora térmica: 80 o 100 mm
     # Expediciones config (JSON array: ["CI 26", "CI 27"])
     serie_expediciones: str = Field(default='[]', max_length=500)
 

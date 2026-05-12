@@ -9,6 +9,7 @@ interface AuthState {
     logout: () => void
     selectedLocal: LocalInfo | null
     setSelectedLocal: (local: LocalInfo | null) => void
+    refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -48,7 +49,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [])
 
     useEffect(() => {
-        if (user?.locales?.length && !selectedLocal) {
+        if (!user?.locales?.length) return
+        if (!selectedLocal) {
             // Si hay un local guardado que sea valido para este usuario, usarlo
             const stored = sessionStorage.getItem('selected_local')
             if (stored) {
@@ -59,8 +61,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 } catch { /* ignore */ }
             }
             setSelectedLocal(user.locales[0])
+        } else {
+            // Sincronizar con datos frescos (p.ej. tras activar asistente_ia)
+            const fresh = user.locales.find(l => l.id === selectedLocal.id)
+            if (fresh) setSelectedLocal(fresh)  // usa setSelectedLocal para actualizar también sessionStorage
         }
     }, [user])
+
+    const refreshUser = async () => {
+        const { data } = await api.get<UserMe>('/api/auth/me')
+        setUser(data)
+    }
 
     async function login(email: string, password: string) {
         const { data } = await api.post('/api/auth/login', { email, password })
@@ -79,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     return (
-        <AuthContext.Provider value={{ user, loading, login, logout, selectedLocal, setSelectedLocal }}>
+        <AuthContext.Provider value={{ user, loading, login, logout, selectedLocal, setSelectedLocal, refreshUser }}>
             {children}
         </AuthContext.Provider>
     )

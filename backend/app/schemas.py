@@ -64,6 +64,7 @@ class RefreshRequest(BaseModel):
 class LocalInfo(BaseModel):
     id: int
     nombre: str
+    asistente_ia: bool = False
 
     class Config:
         from_attributes = True
@@ -85,6 +86,8 @@ class UserMe(BaseModel):
     caja_autoventa: Optional[int] = None
     almacen_autoventa: Optional[int] = None
     caja_reparto: Optional[int] = None
+    precargar_historial_autoventa: bool = True
+    paper_width_impresora: int = 80
     serie_expediciones: list[str] = []
 
     @field_validator('tipodocs_autoventa', mode='before')
@@ -169,6 +172,14 @@ class LocalUpdate(BaseModel):
     nombre: Optional[str] = None
     activo: Optional[bool] = None
     tipo: Optional[str] = None
+    asistente_ia: Optional[bool] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from_name: Optional[str] = None
+    formato_doc: Optional[str] = None
+    portal_activo: Optional[bool] = None
 
 
 class LocalRead(BaseModel):
@@ -179,6 +190,14 @@ class LocalRead(BaseModel):
     tipo: str = "definitiva"
     fecha_alta: Optional[datetime] = None
     fecha_definitiva: Optional[datetime] = None
+    asistente_ia: bool = False
+    smtp_host: Optional[str] = None
+    smtp_port: int = 465
+    smtp_user: Optional[str] = None
+    smtp_from_name: Optional[str] = None
+    formato_doc: str = 'a4_basico_logo_izq'
+    portal_activo: bool = False
+    frx_factura: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -207,7 +226,9 @@ class UsuarioCreate(BaseModel):
     almacen_autoventa: Optional[int] = None
     fpago_autoventa: Optional[int] = None
     solo_clientes_agente: bool = False
+    precargar_historial_autoventa: bool = True
     caja_reparto: Optional[int] = None
+    paper_width_impresora: int = 80
     serie_expediciones: list[str] = []
 
 
@@ -235,7 +256,9 @@ class UsuarioUpdate(BaseModel):
     almacen_autoventa: Optional[int] = None
     fpago_autoventa: Optional[int] = None
     solo_clientes_agente: Optional[bool] = None
+    precargar_historial_autoventa: Optional[bool] = None
     caja_reparto: Optional[int] = None
+    paper_width_impresora: Optional[int] = None
     serie_expediciones: Optional[list[str]] = None
 
 
@@ -258,7 +281,9 @@ class UsuarioRead(BaseModel):
     almacen_autoventa: Optional[int] = None
     fpago_autoventa: Optional[int] = None
     solo_clientes_agente: bool = False
+    precargar_historial_autoventa: bool = True
     caja_reparto: Optional[int] = None
+    paper_width_impresora: int = 80
     serie_expediciones: list[str] = []
 
     @field_validator('permisos', mode='before')

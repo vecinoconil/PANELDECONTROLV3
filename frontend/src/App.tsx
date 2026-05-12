@@ -18,6 +18,7 @@ import RecepcionPedidos from './pages/almacen/RecepcionPedidos'
 import Contratos from './pages/contratos/Contratos'
 import SeguimientoLocales from './pages/admin/SeguimientoLocales'
 import BasesDatos from './pages/admin/BasesDatos'
+import PortalCliente from './pages/PortalCliente'
 
 export default function App() {
     return (
@@ -25,6 +26,7 @@ export default function App() {
             <BrowserRouter>
                 <Routes>
                     <Route path="/login" element={<Login />} />
+                    <Route path="/portal/:token" element={<PortalCliente />} />
                     <Route element={<ProtectedRoute />}>
                         <Route element={<Layout />}>
                             <Route element={<ProtectedRoute requiredPermission="dashboard" action="entrar" />}>

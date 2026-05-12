@@ -20,6 +20,9 @@ from app.routers.contratos import router as contratos_router
 from app.routers.seguimiento import router as seguimiento_router
 from app.routers.hojas_carga import router as hojas_carga_router
 from app.routers.reparto import router as reparto_router
+from app.routers.asistente import router as asistente_router
+from app.routers.portal import router as portal_router
+from app.routers.print_ticket import router as print_ticket_router
 
 
 def _migrate_erp_databases():
@@ -80,12 +83,20 @@ app.include_router(contratos_router,      prefix="/api/contratos",     tags=["Co
 app.include_router(seguimiento_router,    prefix="/api/seguimiento",   tags=["Seguimiento"])
 app.include_router(hojas_carga_router,    prefix="/api/almacen",       tags=["HojasCarga"])
 app.include_router(reparto_router,        prefix="/api/almacen",       tags=["Reparto"])
+app.include_router(asistente_router,      prefix="/api/asistente",     tags=["Asistente"])
+app.include_router(portal_router,         prefix="/api/portal",        tags=["Portal"])
+app.include_router(print_ticket_router,   prefix="/api/print",         tags=["Print"])
 
 
 @app.get("/api/health", tags=["Health"])
 def health():
     return {"status": "ok", "version": "1.0.0"}
 
+
+# ── Descargas (APK Android, etc.) ─────────────────────────────────────────────
+_DOWNLOADS = os.path.abspath(os.path.join(os.path.dirname(__file__), "downloads"))
+os.makedirs(_DOWNLOADS, exist_ok=True)
+app.mount("/downloads", StaticFiles(directory=_DOWNLOADS), name="downloads")
 
 # ── Serve compiled React frontend (SPA fallback) ──────────────────────────────
 _DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))

@@ -6,7 +6,7 @@ import subprocess
 import zipfile
 from datetime import datetime
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 import psycopg2
@@ -25,8 +25,8 @@ from app.services.pg_connection import get_pg_connection
 
 router = APIRouter()
 
-VALID_ROLES = {"superadmin", "gerente", "encargado", "usuario"}
-GERENTE_ALLOWED_ROLES = {"encargado", "usuario"}
+VALID_ROLES = {"superadmin", "gerente", "encargado", "usuario", "distribuidor"}
+GERENTE_ALLOWED_ROLES = {"encargado", "usuario", "distribuidor"}
 
 
 def _assert_can_manage(actor: Usuario, target: Usuario) -> None:
@@ -190,19 +190,48 @@ remotePort = {empresa.tunnel_port}
 """
 
     # install.bat — instala frpc como tarea programada de Windows
+    # watchdog.bat — arranca frpc solo si no está ya en ejecución
+    watchdog_bat = r"""@echo off
+tasklist /fi "IMAGENAME eq frpc.exe" 2>nul | find /i "frpc.exe" >nul 2>&1
+if %ERRORLEVEL% == 0 exit /b 0
+set "DIR=%~dp0"
+start /b "" "%DIR%frpc.exe" -c "%DIR%frpc.toml"
+"""
+
     install_bat = f"""@echo off
 setlocal
 set "DIR=%~dp0"
-set "FRPC=%DIR%frpc.exe"
-set "CFG=%DIR%frpc.toml"
+set "WATCHDOG=%DIR%watchdog.bat"
+
+:: Verificar permisos de administrador y auto-elevar si es necesario
+net session >nul 2>&1
+if %errorLevel% NEQ 0 (
+    echo Solicitando permisos de administrador...
+    powershell -Command "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0' -Verb RunAs"
+    exit /b
+)
 
 echo Instalando tunel FRP para {empresa.nombre}...
 
-:: Eliminar tarea anterior si existe
+:: Eliminar tareas anteriores si existen
 schtasks /delete /tn "frpc-solba" /f >nul 2>&1
+schtasks /delete /tn "frpc-solba-watch" /f >nul 2>&1
 
-:: Crear tarea programada que arranca al inicio como SYSTEM
-schtasks /create /tn "frpc-solba" /tr "\"%FRPC%\" -c \"%CFG%\"" /sc onstart /ru SYSTEM /rl HIGHEST /f
+:: Tarea al inicio del sistema
+schtasks /create /tn "frpc-solba" /tr "cmd /c \\"%WATCHDOG%\\"" /sc onstart /ru SYSTEM /rl HIGHEST /f
+if %errorLevel% NEQ 0 (
+    echo Error: No se pudo crear la tarea de inicio. Codigo: %errorLevel%
+    pause
+    exit /b 1
+)
+
+:: Watchdog cada 15 minutos (reinicia el tunel si se ha cerrado)
+schtasks /create /tn "frpc-solba-watch" /tr "cmd /c \\"%WATCHDOG%\\"" /sc minute /mo 15 /ru SYSTEM /rl HIGHEST /f
+if %errorLevel% NEQ 0 (
+    echo Error: No se pudo crear la tarea watchdog. Codigo: %errorLevel%
+    pause
+    exit /b 1
+)
 
 :: Arrancar ahora
 schtasks /run /tn "frpc-solba"
@@ -210,14 +239,18 @@ schtasks /run /tn "frpc-solba"
 echo.
 echo Tunel instalado y arrancado correctamente.
 echo Puerto remoto asignado: {empresa.tunnel_port}
+echo El watchdog revisara el tunel cada 15 minutos automaticamente.
 echo.
 pause
 """
 
     # uninstall.bat
     uninstall_bat = """@echo off
+taskkill /f /im frpc.exe >nul 2>&1
 schtasks /end /tn "frpc-solba" >nul 2>&1
 schtasks /delete /tn "frpc-solba" /f >nul 2>&1
+schtasks /end /tn "frpc-solba-watch" >nul 2>&1
+schtasks /delete /tn "frpc-solba-watch" /f >nul 2>&1
 echo Tunel desinstalado.
 pause
 """
@@ -228,6 +261,7 @@ pause
         zf.writestr("frpc.toml", frpc_toml)
         zf.writestr("instalar.bat", install_bat)
         zf.writestr("desinstalar.bat", uninstall_bat)
+        zf.writestr("watchdog.bat", watchdog_bat)
         zf.write(frpc_path, "frpc.exe")
     buf.seek(0)
 
@@ -321,6 +355,100 @@ def pasar_local_definitiva(
     return local
 
 
+@router.patch("/locales/{local_id}/toggle-asistente", response_model=LocalRead)
+def toggle_asistente_ia(
+    local_id: int,
+    session: Session = Depends(get_session),
+    _: Usuario = Depends(require_superadmin),
+):
+    """Activa/desactiva el Asistente IA para un local (solo superadmin)."""
+    local = session.get(Local, local_id)
+    if not local:
+        raise HTTPException(status_code=404, detail="Local no encontrado")
+    local.asistente_ia = not local.asistente_ia
+    session.commit()
+    session.refresh(local)
+    return local
+
+
+@router.patch("/locales/{local_id}/toggle-portal", response_model=LocalRead)
+def toggle_portal_local(
+    local_id: int,
+    session: Session = Depends(get_session),
+    current_user: Usuario = Depends(require_gerente_or_above),
+):
+    """Activa/desactiva el Portal de Clientes para un local (superadmin o gerente)."""
+    local = session.get(Local, local_id)
+    if not local:
+        raise HTTPException(status_code=404, detail="Local no encontrado")
+    if current_user.rol == "gerente" and local.empresa_id != current_user.empresa_id:
+        raise HTTPException(status_code=403, detail="Sin acceso a este local")
+    local.portal_activo = not local.portal_activo
+    session.commit()
+    session.refresh(local)
+    return local
+
+
+# Directorio donde se almacenan los FRX subidos
+_FRX_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "frx")
+
+
+@router.post("/locales/{local_id}/frx", response_model=LocalRead)
+async def upload_frx(
+    local_id: int,
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    current_user: Usuario = Depends(require_gerente_or_above),
+):
+    """Sube un fichero .frx (FastReport) como plantilla de facturas para el local."""
+    local = session.get(Local, local_id)
+    if not local:
+        raise HTTPException(status_code=404, detail="Local no encontrado")
+    if current_user.rol == "gerente" and local.empresa_id != current_user.empresa_id:
+        raise HTTPException(status_code=403, detail="Sin acceso a este local")
+
+    if not file.filename or not file.filename.lower().endswith(".frx"):
+        raise HTTPException(status_code=400, detail="Solo se permiten ficheros .frx")
+
+    os.makedirs(_FRX_DIR, exist_ok=True)
+
+    # Nombre seguro: frx_<local_id>.frx (sobrescribe el anterior)
+    dest_filename = f"frx_{local_id}.frx"
+    dest_path = os.path.join(_FRX_DIR, dest_filename)
+
+    content = await file.read()
+    with open(dest_path, "wb") as f:
+        f.write(content)
+
+    local.frx_factura = dest_filename
+    session.commit()
+    session.refresh(local)
+    return local
+
+
+@router.delete("/locales/{local_id}/frx", response_model=LocalRead)
+def delete_frx(
+    local_id: int,
+    session: Session = Depends(get_session),
+    current_user: Usuario = Depends(require_gerente_or_above),
+):
+    """Elimina la plantilla FRX del local (vuelve a usar la predeterminada)."""
+    local = session.get(Local, local_id)
+    if not local:
+        raise HTTPException(status_code=404, detail="Local no encontrado")
+    if current_user.rol == "gerente" and local.empresa_id != current_user.empresa_id:
+        raise HTTPException(status_code=403, detail="Sin acceso a este local")
+
+    if local.frx_factura:
+        path = os.path.join(_FRX_DIR, local.frx_factura)
+        if os.path.isfile(path):
+            os.remove(path)
+        local.frx_factura = None
+        session.commit()
+        session.refresh(local)
+    return local
+
+
 @router.delete("/locales/{local_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_local(
     local_id: int,
@@ -383,6 +511,7 @@ def create_usuario(
         almacen_autoventa=body.almacen_autoventa,
         fpago_autoventa=body.fpago_autoventa,
         solo_clientes_agente=body.solo_clientes_agente,
+        precargar_historial_autoventa=body.precargar_historial_autoventa,
         serie_expediciones=json.dumps(body.serie_expediciones or []),
         caja_reparto=body.caja_reparto,
     )
@@ -871,6 +1000,23 @@ def pgserver_create_user(
         except Exception:
             pass  # PG < 14 no tiene este rol; ignorar
 
+        # Transferir propiedad de todas las tablas y secuencias al usuario
+        # (necesario para ALTER TABLE, CREATE INDEX, DROP, etc.)
+        cur_d.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+        for row in cur_d.fetchall():
+            t_q = psycopg2.extensions.quote_ident(row["tablename"], cur_d)
+            try:
+                cur_d.execute(f"ALTER TABLE public.{t_q} OWNER TO {uid}")
+            except Exception:
+                pass
+        cur_d.execute("SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public'")
+        for row in cur_d.fetchall():
+            s_q = psycopg2.extensions.quote_ident(row["sequence_name"], cur_d)
+            try:
+                cur_d.execute(f"ALTER SEQUENCE public.{s_q} OWNER TO {uid}")
+            except Exception:
+                pass
+
         # Large objects: pg_read_all_data NO los cubre; hay que granar SELECT uno a uno
         # (necesario para que pg_dump/ERP pueda exportarlos)
         try:
@@ -936,6 +1082,24 @@ def pgserver_repair_user(
             cur_d.execute(f"GRANT pg_read_all_data TO {uid}")
         except Exception:
             pass
+
+        # Transferir propiedad de todas las tablas y secuencias al usuario
+        # (necesario para ALTER TABLE, CREATE INDEX, DROP, etc.)
+        cur_d.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+        for row in cur_d.fetchall():
+            t_q = psycopg2.extensions.quote_ident(row["tablename"], cur_d)
+            try:
+                cur_d.execute(f"ALTER TABLE public.{t_q} OWNER TO {uid}")
+            except Exception:
+                pass
+        cur_d.execute("SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public'")
+        for row in cur_d.fetchall():
+            s_q = psycopg2.extensions.quote_ident(row["sequence_name"], cur_d)
+            try:
+                cur_d.execute(f"ALTER SEQUENCE public.{s_q} OWNER TO {uid}")
+            except Exception:
+                pass
+
         # Large objects: pg_read_all_data NO los cubre; hay que granar SELECT uno a uno
         try:
             cur_d.execute("SELECT oid FROM pg_catalog.pg_largeobject_metadata")
@@ -960,7 +1124,7 @@ def pgserver_repair_user(
             except Exception:
                 pass
         conn_srv.close()
-        return {"ok": True, "message": f"Permisos de '{username}' reparados en '{dbname}' (incluye acceso backup)"}
+        return {"ok": True, "message": f"Permisos de '{username}' reparados en '{dbname}' (incluye propiedad de tablas para ALTER TABLE)"}
     except HTTPException:
         raise
     except Exception as e:
@@ -1070,6 +1234,70 @@ def _find_pg_dump() -> str | None:
     return shutil.which("pg_dump")
 
 
+@router.post("/pgserver/{dbname}/get-db-version")
+def pgserver_get_db_version(
+    dbname: str,
+    pg_host: str = Body(...),
+    pg_port: int = Body(5432),
+    pg_user: str = Body(...),
+    pg_password: str = Body(...),
+    _: Usuario = Depends(require_superadmin),
+):
+    """Lee el campo version de la tabla db_version de una base de datos."""
+    conn = None
+    try:
+        conn = _pg_direct(pg_host, pg_port, pg_user, pg_password, dbname=dbname)
+        cur = conn.cursor()
+        cur.execute("SELECT version FROM db_version LIMIT 1")
+        row = cur.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Tabla db_version vacía")
+        return {"version": row["version"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error leyendo db_version: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.post("/pgserver/{dbname}/set-db-version")
+def pgserver_set_db_version(
+    dbname: str,
+    pg_host: str = Body(...),
+    pg_port: int = Body(5432),
+    pg_user: str = Body(...),
+    pg_password: str = Body(...),
+    new_version: str = Body(...),
+    _: Usuario = Depends(require_superadmin),
+):
+    """Actualiza el campo version de la tabla db_version."""
+    if not new_version or not new_version.strip():
+        raise HTTPException(status_code=400, detail="La versión no puede estar vacía")
+    conn = None
+    try:
+        conn = _pg_direct(pg_host, pg_port, pg_user, pg_password, dbname=dbname)
+        conn.autocommit = False
+        cur = conn.cursor()
+        cur.execute("UPDATE db_version SET version = %s", (new_version.strip(),))
+        if cur.rowcount == 0:
+            raise HTTPException(status_code=404, detail="No se encontró ningún registro en db_version para actualizar")
+        conn.commit()
+        return {"ok": True, "version": new_version.strip()}
+    except HTTPException:
+        if conn:
+            conn.rollback()
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Error actualizando db_version: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
 @router.post("/pgserver/{dbname}/backup")
 def pgserver_backup(
     dbname: str,
@@ -1129,6 +1357,7 @@ def pgserver_backup(
     )
 
 
+@router.get("/pg-data/almacenes")
 def pg_almacenes(
     empresa_id: int,
     session: Session = Depends(get_session),

@@ -1,0 +1,664 @@
+﻿
+=== ventas_cabeceras ===
+  id                                       integer
+  tipodoc                                  smallint
+  serie                                    character varying
+  numero                                   integer
+  fecha                                    date
+  fechafin                                 date
+  fechaentrega                             date
+  fecha_pre_conta                          date
+  fecha_conta                              date
+  usuario_pre_conta                        integer
+  usuario_conta                            integer
+  cli_codigo                               integer
+  cli_nombre                               character varying
+  cli_cif                                  character varying
+  cli_direccion                            character varying
+  cli_localidad                            character varying
+  cli_cpostal                              character varying
+  cli_provincia                            integer
+  cli_delegacion                           integer
+  cli_referencia                           text
+  cli_banco                                integer
+  interlocutor                             integer
+  fpago                                    integer
+  agente                                   integer
+  tarifa                                   integer
+  ruta                                     integer
+  fraproforma                              smallint
+  albdeposito                              smallint
+  suma1                                    numeric
+  suma2                                    numeric
+  suma3                                    numeric
+  pdtopp                                   numeric
+  baseimpo1                                numeric
+  baseimpo2                                numeric
+  baseimpo3                                numeric
+  piva1                                    numeric
+  piva2                                    numeric
+  piva3                                    numeric
+  prec1                                    numeric
+  prec2                                    numeric
+  prec3                                    numeric
+  iva1                                     numeric
+  iva2                                     numeric
+  iva3                                     numeric
+  rec1                                     numeric
+  rec2                                     numeric
+  rec3                                     numeric
+  pirpf                                    numeric
+  irpf                                     numeric
+  precfin                                  numeric
+  recfin                                   numeric
+  portes                                   numeric
+  total                                    numeric
+  costeportes                              numeric
+  costefinanc                              numeric
+  costeotros                               numeric
+  usuario                                  integer
+  horamodi                                 timestamp with time zone
+  descripcion                              text
+  observaciones                            text
+  pdtopp_imp                               numeric
+  precfin_imp                              numeric
+  recfin_imp                               numeric
+  comentario                               text
+  esticket                                 smallint
+  motivo_finalizacion                      text
+  fecha_finalizacion                       timestamp with time zone
+  usuario_finalizacion                     integer
+  importe_entregado_ticket                 numeric
+  vale_dto_aplicado                        date
+  cliente_final                            integer
+  id_vale_dto_aplicado                     integer
+  cli_modificado                           boolean
+  cli_observaciones                        character varying
+  cli_telefono                             character varying
+  comisionado                              boolean
+  fecha_valor_iva                          date
+  pedido_web                               character varying
+  terminal                                 integer
+  turno                                    integer
+  tpv_serie_aux                            boolean
+  campania                                 integer
+  bloque                                   character varying
+  portal                                   character varying
+  escalera                                 character varying
+  piso                                     character varying
+  letra                                    character varying
+  urbanizacion                             character varying
+  edificio                                 character varying
+  barrio                                   character varying
+  cod_municipio                            integer
+  puerta                                   character varying
+  numero_calle                             character varying
+  direccion_corta                          character varying
+  municipio                                integer
+  tipovia                                  character varying
+  repartidor                               integer
+  lunes                                    boolean
+  mastes                                   boolean
+  miercoles                                boolean
+  jueves                                   boolean
+  viernes                                  boolean
+  sabado                                   boolean
+  domingo                                  boolean
+  normal                                   boolean
+  alta                                     boolean
+  baja                                     boolean
+  horafija                                 boolean
+  urgente                                  boolean
+  reclamacion                              boolean
+  fechaincidencia                          date
+  remesa_ruta                              integer
+  camion_ruta                              integer
+  fechafija                                date
+  horaentrega_old                          character varying
+  poliza                                   character varying
+  quita_recargo_equivalencia               boolean
+  unoporuno                                boolean
+  gasaltapreciocero                        boolean
+  cli_movil                                character varying
+  cod_vehiculo                             integer
+  nombre_vehiculo                          character varying
+  conductor                                integer
+  nombre_conductor                         character varying
+  remolque                                 integer
+  agencia                                  integer
+  id_conta                                 integer
+  ws_autorizacion                          timestamp without time zone
+  totalpendiente                           numeric
+  facturae_fiscal                          integer
+  facturae_receptor                        integer
+  facturae_pagador                         integer
+  facturae_comprador                       integer
+  facturae_banco                           integer
+  factura_puntos_regalo                    boolean
+  delegacion                               integer
+  forma_reparto                            integer
+  id_order                                 integer
+  incoterms                                integer
+  bnp_texto                                integer
+  idremotoodoo                             character varying
+  imagen_firma                             oid
+  huella_firma                             text
+  hora_firma                               timestamp without time zone
+  pedido_confirmado                        boolean
+  pedido_cobro_banco                       integer
+  pedido_cobro_ident                       text
+  pedido_por                               text
+  tbai_registrado                          boolean
+  rectificada_id                           integer
+  recoger_en_tienda                        boolean
+  adelanto                                 integer
+  adelanto_ajuste                          integer
+  nota_interna                             text
+  comentario_avisar                        boolean
+  observaciones_pedido                     text
+  obra                                     integer
+  retencion_porcent                        numeric
+  retencion_importe                        numeric
+  retencion_es_dto                         boolean
+  bonificacion_estado                      numeric
+  hora_entrega                             timestamp without time zone
+  num_cajas                                numeric
+  horaentrega                              text
+  suma4                                    numeric
+  suma5                                    numeric
+  suma6                                    numeric
+  baseimpo4                                numeric
+  baseimpo5                                numeric
+  baseimpo6                                numeric
+  piva4                                    numeric
+  piva5                                    numeric
+  piva6                                    numeric
+  prec4                                    numeric
+  prec5                                    numeric
+  prec6                                    numeric
+  iva4                                     numeric
+  iva5                                     numeric
+  iva6                                     numeric
+  rec4                                     numeric
+  rec5                                     numeric
+  rec6                                     numeric
+  rectificada_motivo                       text
+  rectificada_criterio                     character varying
+  alquiler_dias                            integer
+  analitica_delegacion                     integer
+  analitica_departamento                   integer
+  analitica_proyecto                       integer
+  facturae_fecha                           date
+  facturae_fecha_estado                    date
+  facturae_estado                          integer
+  facturae_fecha_inicio_contrato           date
+  facturae_fecha_fin_contrato              date
+  verifactu_registrado                     boolean
+  verifactu                                integer
+  aplica_iva_intra                         boolean
+  verifactu_externo                        boolean
+  verifactu_externo_qr                     text
+  periodo_facturacion                      character varying
+  retencion_sobre_bi                       boolean
+  firma                                    text
+
+=== ventas_lineas ===
+  id                                       integer
+  idcab                                    integer
+  tipodoc                                  integer
+  serie                                    character varying
+  numero                                   integer
+  cli_codigo                               integer
+  orden                                    integer
+  fecha                                    date
+  fechaentrega                             date
+  referencia                               character varying
+  descripcion                              character varying
+  unidades                                 numeric
+  gramos                                   numeric
+  precio                                   numeric
+  importe                                  numeric
+  coste                                    numeric
+  pmp                                      numeric
+  piva                                     numeric
+  prec                                     numeric
+  pdto1                                    numeric
+  pdto2                                    numeric
+  pdto3                                    numeric
+  descuento                                numeric
+  almacen                                  integer
+  almacen_destino                          integer
+  tipo_unidad                              smallint
+  udservidas                               numeric
+  grservidos                               numeric
+  idpedidoweb                              integer
+  idpresupuesto                            integer
+  idpedido                                 integer
+  idalbaran                                integer
+  idfactura                                integer
+  idrma                                    integer
+  idsat                                    integer
+  usuautorizaminimo                        integer
+  pvpminautorizado                         numeric
+  usuario                                  integer
+  delegacion                               integer
+  usuario_modifica                         integer
+  hora_creacion                            timestamp with time zone
+  hora_modificacion                        timestamp with time zone
+  linea_cabecera                           smallint
+  unidades_fin                             numeric
+  gramos_fin                               numeric
+  id_ticket_descuento                      integer
+  ud_pte_entrega                           numeric
+  promocion                                smallint
+  canon_id_padre                           integer
+  canon_suma_importe                       boolean
+  canon_segundo_importe                    boolean
+  canon_codigo                             integer
+  talla                                    character varying
+  color                                    character varying
+  id_comision                              integer
+  comision_porcent                         numeric
+  comision_importe                         numeric
+  id_reserva_sport                         text
+  id_contrato                              integer
+  grupo_sport                              integer
+  sin_recargo                              boolean
+  observaciones                            text
+  pesounitario                             numeric
+  pesototal                                numeric
+  pedido_unidad                            character
+  dto_es_euros                             numeric
+  dto_es_litros                            numeric
+  dto_es_tipo                              integer
+  id_matricula_obra                        integer
+  cer                                      numeric
+  inversion_sujeto_pasivo                  boolean
+  precio_original                          numeric
+  idpale                                   integer
+  cs_env                                   boolean
+  cc_pale                                  integer
+  cc_cajas                                 text
+  ped_uds_original                         numeric
+  id_medical                               integer
+  montaje_json                             text
+  ensamblado_id_padre                      integer
+  id_orden_montaje                         integer
+  web_idsat                                integer
+  codigo_impresion                         character varying
+  iva_exento_ley                           integer
+  ag_id_padre                              integer
+  bonificacion_estado                      numeric
+  es_alquiler                              boolean
+  serie_devuelto                           boolean
+  es_tjta_regalo                           boolean
+  rebu                                     boolean
+  exento_ley_iva                           boolean
+
+=== clientes ===
+  codigo                                   integer
+  nombre                                   character varying
+  apellido1                                character varying
+  apellido2                                character varying
+  alias                                    character varying
+  cif                                      character varying
+  tipofiscal                               character
+  nacionalidad                             character
+  direccion                                character varying
+  localidad                                character varying
+  cpostal                                  character varying
+  provincia                                integer
+  pais                                     integer
+  telefono1                                character varying
+  telefono2                                character varying
+  telefono3                                character varying
+  telefono4                                character varying
+  obsoleto                                 smallint
+  web                                      character varying
+  email                                    character varying
+  enviartarifas                            smallint
+  tipo                                     integer
+  subtipo                                  integer
+  ruta                                     integer
+  agencia                                  integer
+  agente                                   integer
+  almacen                                  integer
+  intra                                    smallint
+  exento                                   smallint
+  recargo                                  smallint
+  recfin                                   numeric
+  passwordweb                              character varying
+  dto1                                     numeric
+  dto2                                     numeric
+  dto3                                     numeric
+  dtopp                                    numeric
+  fpago                                    integer
+  diapago1                                 smallint
+  diapago2                                 smallint
+  tarifabase                               integer
+  diapago3                                 smallint
+  tarifaespecial                           integer
+  vacaciones1_ini                          date
+  vacaciones1_fin                          date
+  vacaciones1_rec                          numeric
+  vacaciones2_ini                          date
+  vacaciones2_fin                          date
+  vacaciones2_rec                          numeric
+  ventasanual                              numeric
+  ventastotal                              numeric
+  riesgo                                   numeric
+  bloqueado                                smallint
+  motivobloqueo                            smallint
+  usuariobloqueo                           character varying
+  fechabloqueo                             date
+  avisoventas                              smallint
+  textoaviso                               text
+  cta_contable                             character varying
+  ultimallamada                            date
+  serie_predeterminada                     character varying
+  irpf                                     numeric
+  imprime_datos_cli_doc_envio              boolean
+  observaciones                            text
+  observaciones_venta                      text
+  importe_minimo_libre_portes              numeric
+  fecha_nacimiento                         date
+  siempre_aplica_irpf                      boolean
+  bloque                                   character varying
+  portal                                   character varying
+  escalera                                 character varying
+  piso                                     character varying
+  letra                                    character varying
+  urbanizacion                             character varying
+  edificio                                 character varying
+  barrio                                   character varying
+  cod_municipio                            integer
+  puerta                                   character varying
+  numero_calle                             character varying
+  direccion_corta                          character varying
+  municipio                                integer
+  tipovia                                  character varying
+  poliza                                   character varying
+  gasrigida                                boolean
+  gasflexible                              boolean
+  gascocina                                boolean
+  gascaldera                               boolean
+  gascalefaccion                           boolean
+  gascalentador                            boolean
+  gasfestufa                               boolean
+  gasotros                                 boolean
+  cta_contable_ret                         character varying
+  aseguradora_riesgo                       integer
+  usuario_riesgo                           integer
+  importe_asegurado                        numeric
+  asegurado_hasta                          date
+  fecha_riesgo_interno                     date
+  controlpuntos                            boolean
+  fecha_alta                               date
+  coeficiente_puntos                       numeric
+  nocanon                                  boolean
+  dto_estacion_servicio                    boolean
+  inversion_sujeto_pasivo                  boolean
+  dias_impago                              integer
+  activo                                   boolean
+  es_admin                                 boolean
+  facebook                                 character varying
+  twitter                                  character varying
+  webpage                                  character varying
+  clave                                    character varying
+  clave_pedida                             boolean
+  expira_el                                date
+  token_confirmacion                       character varying
+  linkedin                                 character varying
+  googleplus                               character varying
+  esperiodico                              boolean
+  diasperiodico                            integer
+  fechaperiodica                           date
+  idcab_vta_periodica                      integer
+  tipodoc_periodico                        integer
+  doc_periodico                            character varying
+  porcentaje_incremento_web                numeric
+  consulta_disponible_web                  boolean
+  forma_reparto                            integer
+  facturae                                 boolean
+  idremotoodoo                             character varying
+  carnet_fitosanitario                     character varying
+  canon_exento                             boolean
+  igic                                     boolean
+  rgpd_fecha                               date
+  rgpd_medio                               integer
+  rsi_imagen                               oid
+  huella                                   oid
+  esplantilladiaria                        boolean
+  canon_suma                               boolean
+  lopd_fecha                               date
+  lopd_imagen_firma                        oid
+  lopd_huella_firma                        text
+  lopd_hora_firma                          timestamp without time zone
+  lopd_interlocutor                        integer
+  agenda_fecha_inicio                      date
+  agenda_periodo                           character varying
+  agenda_intervalo                         integer
+  agenda_hora_inicio                       timestamp without time zone
+  factura_simplificada                     boolean
+  num_crm                                  integer
+  genero                                   integer
+  profesion                                text
+  actividad                                text
+  recever_qr                               text
+  damm_subdistribuidor                     boolean
+  albaranes_sin_valorar                    boolean
+  pdtoanual                                numeric
+  factura_papel                            boolean
+  riesgo_fecha_notificacion                date
+  contado_riguroso                         boolean
+  tarifa_esp_dto                           integer
+  tipo_facturacion                         integer
+  web_reset_password                       boolean
+  fecha_baja                               date
+  extranjero                               boolean
+  contrato_cliente_fecha                   date
+  contrato_cliente_imagen_firma            oid
+  contrato_cliente_huella_firma            text
+  contrato_cliente_hora_firma              timestamp without time zone
+  contrato_cliente_interlocutor            integer
+  id_ecommerce                             character varying
+  crea_traspaso_expedicion                 boolean
+  tpv_no_factura_cliente                   boolean
+  aplica_iva_intra                         boolean
+  etiqueta_verde_italia                    boolean
+  intracomunitario_nif_iva                 boolean
+  id_saga                                  integer
+  aplica_iva_extranjero                    boolean
+  usuario_alta                             integer
+  tpv_solo_ticket                          boolean
+
+=== EJEMPLO CABECERA ===
+  id: 66280
+  tipodoc: 8
+  serie: CI 26
+  numero: 438
+  fecha: 2026-05-11
+  cli_codigo: 1003040
+  cli_nombre: TELEFONICA MOVILES ESPAÑA S.A
+  cli_cif: A78923125
+  cli_direccion: LA COMUNICACION, S/N, DISTRITO C, EDIFICIO SUR, 3
+  cli_localidad: MADRID
+  cli_cpostal: 28050
+  cli_provincia: 28
+  fpago: 49
+  agente: 1
+  tarifa: 1
+  suma1: 330.000000
+  suma2: 0.000000
+  suma3: 0.000000
+  pdtopp: 0.00000
+  baseimpo1: 330.000000
+  baseimpo2: 0.000000
+  baseimpo3: 0.000000
+  piva1: 21.00
+  iva1: 69.300000
+  iva2: 0.000000
+  iva3: 0.000000
+  rec1: 0.000000
+  rec2: 0.000000
+  rec3: 0.000000
+  irpf: 0.000000
+  precfin: 0.0000
+  recfin: 0.000000
+  portes: 0.000000
+  total: 399.300000
+  costeportes: 0.000000
+  costefinanc: 0.000000
+  costeotros: 0.000000
+  usuario: 1
+  horamodi: 2026-05-11 16:51:46+00:00
+  descripcion: SERVICIOS COMPLEMENTARIOS 
+  pdtopp_imp: 0.0000
+  precfin_imp: 0.0000
+  recfin_imp: 0.000000
+  importe_entregado_ticket: 0.000000
+  cli_modificado: False
+  comisionado: False
+  terminal: 1
+  turno: 2732
+  tpv_serie_aux: False
+  lunes: False
+  mastes: False
+  miercoles: False
+  jueves: False
+  viernes: False
+  sabado: False
+  domingo: False
+  normal: False
+  alta: False
+  baja: False
+  horafija: False
+  urgente: False
+  reclamacion: False
+  quita_recargo_equivalencia: False
+  unoporuno: False
+  gasaltapreciocero: False
+  totalpendiente: 0.000000
+  factura_puntos_regalo: False
+  id_order: 64390
+  pedido_confirmado: False
+  tbai_registrado: False
+  recoger_en_tienda: False
+  comentario_avisar: True
+  retencion_importe: 0.000000
+  retencion_es_dto: False
+  bonificacion_estado: 0.000000
+  suma4: 0.000000
+  suma5: 0.000000
+  suma6: 0.000000
+  baseimpo4: 0.000000
+  baseimpo5: 0.000000
+  baseimpo6: 0.000000
+  iva4: 0.000000
+  iva5: 0.000000
+  iva6: 0.000000
+  rec4: 0.000000
+  rec5: 0.000000
+  rec6: 0.000000
+  verifactu_registrado: False
+  aplica_iva_intra: False
+  verifactu_externo: False
+  retencion_sobre_bi: False
+  _cli_nombre: TELEFONICA MOVILES ESPAÑA S.A
+  _cli_cif: A78923125
+  _cli_dir: LA COMUNICACION, S/N, DISTRITO C, EDIFICIO SUR, 3
+  _cli_loc: MADRID
+  _cli_cp: 28050
+  _cli_prov: 28
+
+=== EJEMPLO LÍNEAS (primera) ===
+  id: 192849
+  idcab: 66280
+  tipodoc: 8
+  serie: CI 26
+  numero: 438
+  cli_codigo: 1003040
+  orden: 1
+  fecha: 2026-05-11
+  referencia: 
+  descripcion: SERVICIOS COMPLEMENTARIOS 
+  unidades: 1.000000
+  gramos: 0.000000
+  precio: 330.000000
+  importe: 330.000000
+  coste: 0.000000
+  pmp: 0.000000
+  piva: 21.00
+  prec: 5.40
+  pdto1: 0.00
+  pdto2: 0.00
+  pdto3: 0.00
+  descuento: 0.000000
+  almacen: 1
+  almacen_destino: 0
+  tipo_unidad: 0
+  udservidas: 0.000000
+  grservidos: 0.000000
+  idpedidoweb: 0
+  idpresupuesto: 0
+  idpedido: 0
+  idalbaran: 0
+  idfactura: 0
+  idrma: 0
+  idsat: 0
+  usuautorizaminimo: 0
+  pvpminautorizado: 0.000000
+  usuario: 1
+  delegacion: 0
+  usuario_modifica: 1
+  hora_creacion: 2026-05-11 16:51:46.301873+00:00
+  hora_modificacion: 2026-05-11 16:51:46.301873+00:00
+  linea_cabecera: 0
+  unidades_fin: 0.000000
+  gramos_fin: 0.000000
+  id_ticket_descuento: 0
+  ud_pte_entrega: 0.000000
+  promocion: 0
+  canon_id_padre: 0
+  canon_suma_importe: False
+  canon_segundo_importe: False
+  canon_codigo: 0
+  talla: 
+  color: 
+  id_comision: 0
+  comision_porcent: 0.000000
+  comision_importe: 0.000000
+  id_reserva_sport: 
+  id_contrato: 0
+  grupo_sport: 0
+  sin_recargo: False
+  observaciones: 
+  pesounitario: 0.000000
+  pesototal: 0.000000
+  pedido_unidad:  
+  dto_es_euros: 0.000000
+  dto_es_litros: 0.000000
+  dto_es_tipo: 0
+  id_matricula_obra: 0
+  cer: 0.000000
+  inversion_sujeto_pasivo: False
+  precio_original: 330.000000
+  idpale: 0
+  cs_env: False
+  cc_pale: 0
+  cc_cajas: 
+  ped_uds_original: 0.000000
+  id_medical: 0
+  montaje_json: 
+  ensamblado_id_padre: 0
+  id_orden_montaje: 0
+  web_idsat: 0
+  codigo_impresion: 
+  iva_exento_ley: 0
+  ag_id_padre: 0
+  bonificacion_estado: 0.000000
+  es_alquiler: False
+  serie_devuelto: False
+  es_tjta_regalo: False
+  rebu: False
+  exento_ley_iva: False

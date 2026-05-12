@@ -1,12 +1,17 @@
 import { useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { Menu } from 'lucide-react'
 import Sidebar from './Sidebar'
+import AsisteChat from './AsisteChat'
+import { useAuth } from '../auth/AuthContext'
 
 declare const __BUILD_TIME__: string
 
 export default function Layout() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+    const { user, selectedLocal } = useAuth()
+    const location = useLocation()
+    const isDashboard = location.pathname === '/' || location.pathname === '/dashboard'
 
     return (
         <div className="min-h-screen bg-slate-100">
@@ -32,6 +37,8 @@ export default function Layout() {
             <main className="lg:ml-16 pt-14 lg:pt-0">
                 <Outlet />
             </main>
+
+            {selectedLocal?.asistente_ia && isDashboard && <AsisteChat />}
         </div>
     )
 }

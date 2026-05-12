@@ -5,8 +5,10 @@ import { UserMe } from '../../types'
 import {
     ShoppingCart, FileText, Truck, Search, Calculator,
     X, Check, Loader2, AlertCircle, CreditCard, ChevronDown, ChevronUp, Plus,
-    Image, List, Package, MapPin, PenLine, Trash2, BarChart2, Edit2,
+    Image, List, Package, MapPin, PenLine, Trash2, BarChart2, Edit2, Mail,
+    Printer, Settings,
 } from 'lucide-react'
+import { loadPrinterConfig, savePrinterConfig, printTicket, hasAndroidBridge } from '../../utils/thermalPrinter'
 
 // â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -114,6 +116,7 @@ interface DocCliente {
     serie: string
     numero: number
     fecha: string
+    cli_nombre: string
     total: number
     pagado: number
     pendiente: number
@@ -806,7 +809,7 @@ function DobleUnidadLoteModal({
 }
 
 export default function Autoventa() {
-    const { user } = useAuth()
+    const { user, selectedLocal, refreshUser } = useAuth()
     const typedUser = user as UserMe | null
     const canEditPrice = typedUser?.rol === 'superadmin' || typedUser?.rol === 'gerente' || typedUser?.autoventa_modifica_precio === true
 
@@ -865,6 +868,8 @@ export default function Autoventa() {
         referencia: string
         descripcion: string
         unidades: number
+        gramos?: number
+        tipo_unidad?: number
         precio: number
         dto: number
         importe: number
@@ -885,10 +890,51 @@ export default function Autoventa() {
     }
     const [detalleDoc, setDetalleDoc] = useState<DetalleDoc | null>(null)
     const [detalleDocLoading, setDetalleDocLoading] = useState(false)
+    const [quickPrintingDocId, setQuickPrintingDocId] = useState<number | null>(null)
+
+    const handleQuickPrint = async (cliCodigo: number, doc: { id: number; tipodoc: number; tipodoc_label: string; serie: string; numero: number; fecha: string | null; cli_nombre: string; total: number }) => {
+        setQuickPrintingDocId(doc.id)
+        try {
+            const r = await api.get<DetalleDoc>(`/api/autoventa/clientes/${cliCodigo}/documentos/${doc.id}/lineas`)
+            const d = r.data
+            const cfg = loadPrinterConfig()
+            await printTicket(
+                {
+                    tipodoc_label: doc.tipodoc_label,
+                    serie: doc.serie,
+                    numero: doc.numero,
+                    fecha: doc.fecha,
+                    cli_nombre: doc.cli_nombre,
+                    lineas: d.lineas.map(l => ({
+                        descripcion: l.descripcion,
+                        unidades: String(l.unidades),
+                        gramos: l.gramos ? String(l.gramos) : undefined,
+                        tipo_unidad: l.tipo_unidad ?? 0,
+                        unidad: String(l.unidades),
+                        precio: l.precio,
+                        dto: l.dto,
+                        piva: l.piva,
+                        talla: l.talla,
+                        color: l.color,
+                    })),
+                    total: doc.total,
+                    agenteNombre: agenteNombre || undefined,
+                },
+                cfg,
+            )
+        } catch { /* silencioso */ } finally {
+            setQuickPrintingDocId(null)
+        }
+    }
 
     const openDetalleDoc = async (cliCodigo: number, idcab: number) => {
         setDetalleDocLoading(true)
         setDetalleDoc(null)
+        setDetalleDocEmail('')
+        setDetalleDocEmailEnviado(false)
+        setDetalleDocEmailError('')
+        setDetallePrintOk(false)
+        setDetallePrintError('')
         try {
             const r = await api.get<DetalleDoc>(`/api/autoventa/clientes/${cliCodigo}/documentos/${idcab}/lineas`)
             setDetalleDoc(r.data)
@@ -924,38 +970,54 @@ export default function Autoventa() {
     const [consultarCobrandoMultiple, setConsultarCobrandoMultiple] = useState(false)
     const [consultarCobrarError, setConsultarCobrarError] = useState('')
 
-    // Arqueo
-    type ArqueoFiltro = 'hoy' | 'semana' | 'mes' | 'avanzado'
-    interface ArqueoLinea {
+    // Liquidación
+    interface LiqDocHoy {
         id: number
-        fecha: string | null
+        tipodoc: number
+        tipodoc_label: string
+        serie: string
+        numero: number | null
+        fecha: string
+        cli_codigo: number
+        cli_nombre: string
+        total: number
+        cobrado: number
+        pendiente: number
+    }
+    interface LiqCobroOtro {
+        id: number
         concepto: string
         serie: string
         numero: number | null
+        fecha_doc: string | null
         cli_nombre: string
-        idcab: number | null
         ingreso: number
         reintegro: number
-        saldo: number
     }
-    const [showArqueoModal, setShowArqueoModal] = useState(false)
-    const [arqueoFiltro, setArqueoFiltro] = useState<ArqueoFiltro>('hoy')
-    const [arqueoDesde, setArqueoDesde] = useState('')
-    const [arqueoHasta, setArqueoHasta] = useState('')
-    const [arqueoLineas, setArqueoLineas] = useState<ArqueoLinea[]>([])
-    const [arqueoTotalIngreso, setArqueoTotalIngreso] = useState(0)
-    const [arqueoTotalReintegro, setArqueoTotalReintegro] = useState(0)
-    const [arqueoSaldoFinal, setArqueoSaldoFinal] = useState(0)
-    const [arqueoLoading, setArqueoLoading] = useState(false)
-    const [arqueoError, setArqueoError] = useState('')
+    const [showLiquidacionModal, setShowLiquidacionModal] = useState(false)
+    const [liqDocsHoy, setLiqDocsHoy] = useState<LiqDocHoy[]>([])
+    const [liqCobrosOtros, setLiqCobrosOtros] = useState<LiqCobroOtro[]>([])
+    const [liqTotalVentas, setLiqTotalVentas] = useState(0)
+    const [liqTotalCobradoHoy, setLiqTotalCobradoHoy] = useState(0)
+    const [liqTotalCobrosOtros, setLiqTotalCobrosOtros] = useState(0)
+    const [liqFecha, setLiqFecha] = useState('')
+    const [liqLoading, setLiqLoading] = useState(false)
+    const [liqError, setLiqError] = useState('')
+    const [liqEmailSending, setLiqEmailSending] = useState(false)
+    const [liqEmailMsg, setLiqEmailMsg] = useState('')
+    const [liqEmailDest, setLiqEmailDest] = useState('')
+    type LiqFiltro = 'hoy' | 'semana' | 'mes' | 'avanzado'
+    const [liqFiltro, setLiqFiltro] = useState<LiqFiltro>('hoy')
+    const [liqDesde, setLiqDesde] = useState('')
+    const [liqHasta, setLiqHasta] = useState('')
 
-    const calcArqueoDates = (filtro: ArqueoFiltro) => {
+    const calcLiqDates = (filtro: LiqFiltro): { desde: string; hasta: string } | null => {
         const hoy = new Date()
         const fmt = (d: Date) => d.toISOString().slice(0, 10)
         if (filtro === 'hoy') return { desde: fmt(hoy), hasta: fmt(hoy) }
         if (filtro === 'semana') {
             const lunes = new Date(hoy)
-            lunes.setDate(hoy.getDate() - hoy.getDay() + 1)
+            lunes.setDate(hoy.getDate() - ((hoy.getDay() + 6) % 7))
             return { desde: fmt(lunes), hasta: fmt(hoy) }
         }
         if (filtro === 'mes') {
@@ -965,38 +1027,70 @@ export default function Autoventa() {
         return null
     }
 
-    const cargarArqueo = async (filtro: ArqueoFiltro, desde?: string, hasta?: string) => {
+    const cargarLiquidacion = async (filtro: LiqFiltro = 'hoy', desde?: string, hasta?: string) => {
         let d = desde, h = hasta
         if (filtro !== 'avanzado') {
-            const dates = calcArqueoDates(filtro)
+            const dates = calcLiqDates(filtro)
             if (!dates) return
             d = dates.desde; h = dates.hasta
         }
         if (!d || !h) return
-        setArqueoLoading(true)
-        setArqueoError('')
+        setLiqDesde(d)
+        setLiqHasta(h)
+        setLiqLoading(true)
+        setLiqError('')
+        setLiqEmailMsg('')
         try {
-            const r = await api.get('/api/autoventa/arqueo', { params: { desde: d, hasta: h } })
-            setArqueoLineas(r.data.lineas)
-            setArqueoTotalIngreso(r.data.total_ingreso)
-            setArqueoTotalReintegro(r.data.total_reintegro)
-            setArqueoSaldoFinal(r.data.saldo_final)
+            const r = await api.get('/api/autoventa/liquidacion', { params: { desde: d, hasta: h } })
+            setLiqFecha(r.data.fecha)
+            setLiqDocsHoy(r.data.docs_hoy)
+            setLiqCobrosOtros(r.data.cobros_otros_dias)
+            setLiqTotalVentas(r.data.total_ventas)
+            setLiqTotalCobradoHoy(r.data.total_cobrado_hoy)
+            setLiqTotalCobrosOtros(r.data.total_cobros_otros_dias)
         } catch {
-            setArqueoError('Error cargando arqueo')
+            setLiqError('Error cargando liquidación')
         } finally {
-            setArqueoLoading(false)
+            setLiqLoading(false)
         }
     }
 
-    const openArqueo = () => {
-        setArqueoFiltro('hoy')
+    const openLiquidacion = () => {
         const hoy = new Date().toISOString().slice(0, 10)
-        setArqueoDesde(hoy)
-        setArqueoHasta(hoy)
-        setArqueoLineas([])
-        setArqueoError('')
-        setShowArqueoModal(true)
-        cargarArqueo('hoy')
+        setLiqDocsHoy([])
+        setLiqCobrosOtros([])
+        setLiqError('')
+        setLiqEmailMsg('')
+        setLiqFiltro('hoy')
+        setLiqDesde(hoy)
+        setLiqHasta(hoy)
+        const lastEmail = localStorage.getItem('liq_email_dest')
+        setLiqEmailDest(lastEmail || (user as UserMe)?.email || '')
+        setShowLiquidacionModal(true)
+        cargarLiquidacion('hoy')
+    }
+
+    const enviarLiquidacionEmail = async () => {
+        setLiqEmailSending(true)
+        setLiqEmailMsg('')
+        try {
+            await api.post('/api/autoventa/enviar-liquidacion', {
+                fecha: liqFecha,
+                docs_hoy: liqDocsHoy,
+                cobros_otros_dias: liqCobrosOtros,
+                total_ventas: liqTotalVentas,
+                total_cobrado_hoy: liqTotalCobradoHoy,
+                total_cobros_otros_dias: liqTotalCobrosOtros,
+                email_destino: liqEmailDest,
+            })
+            setLiqEmailMsg('Email enviado correctamente')
+            localStorage.setItem('liq_email_dest', liqEmailDest.trim())
+        } catch (e: unknown) {
+            const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Error enviando email'
+            setLiqEmailMsg(msg)
+        } finally {
+            setLiqEmailSending(false)
+        }
     }
 
     // ── Consultar: funciones del nuevo modal ──────────────────────────────
@@ -1147,11 +1241,35 @@ export default function Autoventa() {
     } | null>(null)
     const [error, setError] = useState('')
 
+    // Impresora térmica
+    const isAndroid = /android/i.test(navigator.userAgent)
+    const [printing, setPrinting] = useState(false)
+    const [printError, setPrintError] = useState('')
+    const [printOk, setPrintOk] = useState(false)
+    const [showPrinterConfig, _setShowPrinterConfig] = useState(false)  // unused, kept for compat
+    const [paperWidth, setPaperWidth] = useState<80 | 100>(() => {
+        const cfg = loadPrinterConfig()
+        return (cfg.paper_width ?? 80) as 80 | 100
+    })
+    // Precargar historial: viene del perfil del usuario (por defecto true)
+    const precargarHistorial = typedUser?.precargar_historial_autoventa !== false
+
+    // Impresión desde detalle documento
+    const [detallePrinting, setDetallePrinting] = useState(false)
+    const [detallePrintOk, setDetallePrintOk] = useState(false)
+    const [detallePrintError, setDetallePrintError] = useState('')
+
     // Post-venta: cobrar + email
     const [postVentaEmail, setPostVentaEmail] = useState('')
     const [postVentaEnviando, setPostVentaEnviando] = useState(false)
     const [postVentaEmailEnviado, setPostVentaEmailEnviado] = useState(false)
     const [postVentaEmailError, setPostVentaEmailError] = useState('')
+
+    // Detalle doc: envío email
+    const [detalleDocEmail, setDetalleDocEmail] = useState('')
+    const [detalleDocEnviando, setDetalleDocEnviando] = useState(false)
+    const [detalleDocEmailEnviado, setDetalleDocEmailEnviado] = useState(false)
+    const [detalleDocEmailError, setDetalleDocEmailError] = useState('')
 
     // Post-venta: firma
     const [showFirmaModal, setShowFirmaModal] = useState(false)
@@ -1173,6 +1291,19 @@ export default function Autoventa() {
     const [detalleLoading, setDetalleLoading] = useState(false)
 
     const hasClienteContext = !!(clienteSeleccionado || consultarCliente || docsClienteTarget)
+
+    // Refrescar perfil al montar para tener precargar_historial_autoventa actualizado
+    useEffect(() => { refreshUser().catch(() => {}) }, [])
+
+    // Sincronizar paper_width desde el perfil del usuario al localStorage
+    useEffect(() => {
+        const w = typedUser?.paper_width_impresora
+        if (w === 80 || w === 100) {
+            const cfg = loadPrinterConfig()
+            savePrinterConfig({ ...cfg, paper_width: w })
+            setPaperWidth(w)
+        }
+    }, [typedUser?.paper_width_impresora])
 
     // Load agente info + cache clientes on mount
     useEffect(() => {
@@ -1241,6 +1372,10 @@ export default function Autoventa() {
         setLoadingProductos(true)
         setLineas([])
         try {
+            if (!precargarHistorial) {
+                // Sin precargar historial: lista vacía
+                setLineas([])
+            } else {
             const r = await api.get<ProductoConsumo[]>(`/api/autoventa/clientes/${c.codigo}/consumo-90dias`)
             setLineas(r.data.map(p => ({
                 referencia: p.referencia,
@@ -1260,6 +1395,7 @@ export default function Autoventa() {
                 canon_importe_unit: p.canon_importe ?? 0,
                 canon_descripcion: p.canon_descripcion ?? '',
             })))
+            }
         } catch { setLineas([]) }
         finally { setLoadingProductos(false) }
     }
@@ -1834,6 +1970,8 @@ export default function Autoventa() {
 
     const verDetalleAlbaran = async (id: number) => {
         setDetalleLoading(true)
+        setDetallePrintOk(false)
+        setDetallePrintError('')
         try {
             const r = await api.get<DetalleAlbaran>(`/api/autoventa/documentos/${id}/detalle`)
             setDetalleAlbaran(r.data)
@@ -1898,6 +2036,26 @@ export default function Autoventa() {
         }
     }
 
+    const handleEnviarEmailDetalle = async () => {
+        if (!detalleDoc || !detalleDocEmail) return
+        setDetalleDocEnviando(true)
+        setDetalleDocEmailError('')
+        try {
+            await api.post('/api/autoventa/enviar-documento', {
+                cli_codigo: detalleDoc.cli_codigo,
+                idcab: detalleDoc.id,
+                tipodoc: detalleDoc.tipodoc,
+                email_destino: detalleDocEmail,
+                local_id: selectedLocal?.id ?? null,
+            })
+            setDetalleDocEmailEnviado(true)
+        } catch (e: any) {
+            setDetalleDocEmailError(e.response?.data?.detail || 'Error enviando email')
+        } finally {
+            setDetalleDocEnviando(false)
+        }
+    }
+
     const handleEnviarEmail = async () => {
         if (!resultado || !postVentaEmail) return
         setPostVentaEnviando(true)
@@ -1908,6 +2066,7 @@ export default function Autoventa() {
                 idcab: resultado.idcab,
                 tipodoc: resultado.tipodoc,
                 email_destino: postVentaEmail,
+                local_id: selectedLocal?.id ?? null,
             })
             setPostVentaEmailEnviado(true)
         } catch (e: any) {
@@ -1988,6 +2147,105 @@ export default function Autoventa() {
     }
 
     // â”€â”€ Pantalla post-venta â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Imprimir ticket térmico ──────────────────────────────────────────────
+    const handlePrint = async () => {
+        if (!resultado || !clienteSeleccionado) return
+        const cfg = loadPrinterConfig()
+        setPrinting(true)
+        setPrintError('')
+        setPrintOk(false)
+        try {
+            await printTicket(
+                {
+                    tipodoc_label: resultado.tipodoc_label,
+                    serie: resultado.serie,
+                    numero: resultado.numero,
+                    fecha: new Date().toISOString(),
+                    cli_nombre: clienteSeleccionado.nombre,
+                    lineas: lineas.map(l => ({
+                        descripcion: l.descripcion,
+                        unidades: l.unidades,
+                        gramos: l.gramos,
+                        tipo_unidad: l.tipo_unidad,
+                        unidad: l.unidad,
+                        precio: l.precio,
+                        dto: l.dto,
+                        piva: l.piva,
+                        talla: l.talla,
+                        color: l.color,
+                        es_canon: l.es_canon,
+                    })),
+                    total: resultado.total,
+                    agenteNombre: agenteNombre || undefined,
+                },
+                cfg,
+            )
+            setPrintOk(true)
+        } catch (e: any) {
+            setPrintError(e.message || 'Error al imprimir')
+        } finally {
+            setPrinting(false)
+        }
+    }
+
+    // ── Imprimir desde detalle de documento (detalleAlbaran / detalleDoc) ───
+    const handlePrintDoc = async (doc: {
+        tipodoc_label: string
+        serie: string
+        numero: number
+        fecha: string | null
+        cli_nombre: string
+        total: number
+        lineas: Array<{
+            descripcion: string
+            unidades: number
+            precio: number
+            dto: number
+            piva: number
+            talla?: string
+            color?: string
+            gramos?: number
+            tipo_unidad?: number
+            unidad?: string
+        }>
+    }) => {
+        const cfg = loadPrinterConfig()
+        setDetallePrinting(true)
+        setDetallePrintError('')
+        setDetallePrintOk(false)
+        try {
+            await printTicket(
+                {
+                    tipodoc_label: doc.tipodoc_label,
+                    serie: doc.serie,
+                    numero: doc.numero,
+                    fecha: doc.fecha,
+                    cli_nombre: doc.cli_nombre,
+                    lineas: doc.lineas.map(l => ({
+                        descripcion: l.descripcion,
+                        unidades: String(l.unidades),
+                        gramos: l.gramos ? String(l.gramos) : undefined,
+                        tipo_unidad: l.tipo_unidad ?? 0,
+                        unidad: l.unidad,
+                        precio: l.precio,
+                        dto: l.dto,
+                        piva: l.piva,
+                        talla: l.talla,
+                        color: l.color,
+                    })),
+                    total: doc.total,
+                    agenteNombre: agenteNombre || undefined,
+                },
+                cfg,
+            )
+            setDetallePrintOk(true)
+        } catch (e: any) {
+            setDetallePrintError(e.message || 'Error al imprimir')
+        } finally {
+            setDetallePrinting(false)
+        }
+    }
+
     if (resultado) {
         const esCobrable = resultado.tipodoc === 4 || resultado.tipodoc === 8
         return (
@@ -2107,6 +2365,44 @@ export default function Autoventa() {
                     )}
                 </div>
 
+                {/* Imprimir ticket térmico */}
+                <div className="card p-4">
+                    <p className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                        <Printer className="w-4 h-4 text-slate-600" /> Imprimir ticket térmico
+                    </p>
+
+                    <button
+                        onClick={handlePrint}
+                        disabled={printing}
+                        className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium text-sm transition-colors ${
+                            printOk
+                                ? 'bg-green-50 border border-green-200 text-green-700'
+                                : 'bg-slate-700 text-white hover:bg-slate-800'
+                        } disabled:opacity-50`}
+                    >
+                        {printing
+                            ? <><Loader2 className="w-4 h-4 animate-spin" />Imprimiendo...</>
+                            : printOk
+                                ? <><Check className="w-4 h-4" />Ticket imprimiéndose</>
+                                : <><Printer className="w-4 h-4" />Imprimir ticket ({paperWidth} mm)</>
+                        }
+                    </button>
+                    {printError && (
+                        <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />{printError}
+                        </p>
+                    )}
+                    {isAndroid && !hasAndroidBridge() && (
+                        <a
+                            href="/downloads/solba-panel.apk"
+                            download
+                            className="mt-2 flex items-center justify-center gap-2 w-full py-2 rounded-xl text-sm font-medium border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 transition-colors"
+                        >
+                            📲 Instala la app Solba Panel para imprimir directamente
+                        </a>
+                    )}
+                </div>
+
                 <button onClick={handleNuevo} className="btn-primary w-full">Nuevo documento</button>
 
                 {/* Cobrar modal (para albarán post-venta) */}
@@ -2147,6 +2443,7 @@ export default function Autoventa() {
                         onClose={() => setShowFirmaModal(false)}
                     />
                 )}
+
             </div>
         )
     }
@@ -2163,6 +2460,17 @@ export default function Autoventa() {
                     </span>
                 )}
                 <div className="ml-auto flex items-center gap-2">
+                    {/* Banner instalar APK: visible en Android cuando no está la app nativa */}
+                    {isAndroid && !hasAndroidBridge() && (
+                        <a
+                            href="/downloads/solba-panel.apk"
+                            download
+                            className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 transition-colors"
+                            title="Descarga la app nativa para imprimir directamente a la Bixolon"
+                        >
+                            📲 App
+                        </a>
+                    )}
                     {lineasConUds.length > 0 && !editandoFinalizado && (
                         <button
                             onClick={() => setShowCarritoModal(true)}
@@ -2182,10 +2490,10 @@ export default function Autoventa() {
                         <Search className="w-4 h-4" /> Consultar
                     </button>
                     <button
-                        onClick={openArqueo}
+                        onClick={openLiquidacion}
                         className="flex items-center gap-1.5 text-sm font-medium text-indigo-700 bg-indigo-50 border border-indigo-300 px-3 py-1.5 rounded-xl hover:bg-indigo-100 transition-colors"
                     >
-                        <BarChart2 className="w-4 h-4" /> Arqueo
+                        <BarChart2 className="w-4 h-4" /> Liquidación
                     </button>
                     <button
                         onClick={handleNuevo}
@@ -2196,6 +2504,7 @@ export default function Autoventa() {
                     >
                         <X className="w-4 h-4" />
                     </button>
+
                 </div>
             </div>
 
@@ -2340,6 +2649,20 @@ export default function Autoventa() {
                                                     </p>
                                                 )}
                                             </div>
+                                            {/* Botón imprimir (pedidos y albaranes) */}
+                                            {(esPedido || esAlbaran) && (
+                                                <button
+                                                    onClick={e => { e.stopPropagation(); handleQuickPrint(doc.cli_codigo, { id: doc.id, tipodoc: tipodoc!, tipodoc_label: TIPOS.find(t => t.id === tipodoc)?.label ?? '', serie: doc.serie, numero: doc.numero, fecha: doc.fecha, cli_nombre: doc.cli_nombre, total: doc.total }) }}
+                                                    disabled={quickPrintingDocId === doc.id}
+                                                    className="flex items-center justify-center w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 flex-shrink-0"
+                                                    title="Imprimir ticket"
+                                                >
+                                                    {quickPrintingDocId === doc.id
+                                                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                        : <Printer className="w-3.5 h-3.5" />
+                                                    }
+                                                </button>
+                                            )}
                                             {esEditable && (
                                                 <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">Editar</span>
                                             )}
@@ -3128,12 +3451,23 @@ export default function Autoventa() {
                                                     {doc.tipodoc === 4 && <p className="text-amber-700 font-medium">&#x23F3; Pendiente de facturar</p>}
                                                     <p>Importe: <span className="font-medium">{doc.total.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}&#x20AC;</span></p>
                                                 </div>
-                                                <div className="flex gap-1.5">
+                                                <div className="flex gap-1.5 flex-wrap justify-end">
                                                     <button
                                                         onClick={() => openDetalleDoc((docsClienteTarget || clienteSeleccionado)!.codigo, doc.id)}
                                                         className="flex items-center gap-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg"
                                                     >
                                                         <List className="w-3.5 h-3.5" /> Ver
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleQuickPrint((docsClienteTarget || clienteSeleccionado)!.codigo, doc)}
+                                                        disabled={quickPrintingDocId === doc.id}
+                                                        className="flex items-center gap-1 text-xs font-medium text-white bg-slate-700 hover:bg-slate-800 px-3 py-1.5 rounded-lg disabled:opacity-50"
+                                                    >
+                                                        {quickPrintingDocId === doc.id
+                                                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                            : <Printer className="w-3.5 h-3.5" />
+                                                        }
+                                                        Imprimir
                                                     </button>
                                                     {doc.tipodoc === 4 && (
                                                         <button
@@ -3299,6 +3633,72 @@ export default function Autoventa() {
                                 </table>
                             )}
                         </div>
+                        {/* ── Footer envío email + imprimir ── */}
+                        {detalleDoc && (
+                            <div className="border-t border-slate-200 px-4 py-3 flex-shrink-0 space-y-2">
+                                {/* Email */}
+                                {detalleDocEmailEnviado ? (
+                                    <p className="text-green-600 text-sm flex items-center gap-1.5">
+                                        <Check className="w-4 h-4" /> Email enviado correctamente
+                                    </p>
+                                ) : (
+                                    <div className="flex gap-2">
+                                        <input
+                                            className="input flex-1 text-sm"
+                                            type="email"
+                                            placeholder="Email destinatario..."
+                                            value={detalleDocEmail}
+                                            onChange={e => { setDetalleDocEmail(e.target.value); setDetalleDocEmailEnviado(false); setDetalleDocEmailError('') }}
+                                        />
+                                        <button
+                                            onClick={handleEnviarEmailDetalle}
+                                            disabled={!detalleDocEmail || detalleDocEnviando}
+                                            className="btn-primary flex items-center gap-1.5 text-sm px-3 disabled:opacity-50"
+                                        >
+                                            {detalleDocEnviando ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                                            Enviar
+                                        </button>
+                                    </div>
+                                )}
+                                {detalleDocEmailError && <p className="text-red-600 text-xs mt-1">{detalleDocEmailError}</p>}
+                                {/* Imprimir */}
+                                <button
+                                    onClick={() => handlePrintDoc({
+                                        tipodoc_label: detalleDoc.tipodoc === 4 ? 'Albarán' : detalleDoc.tipodoc === 8 ? 'Factura' : 'Pedido',
+                                        serie: detalleDoc.serie,
+                                        numero: detalleDoc.numero,
+                                        fecha: detalleDoc.fecha,
+                                        cli_nombre: detalleDoc.cli_nombre,
+                                        total: detalleDoc.total,
+                                        lineas: detalleDoc.lineas,
+                                    })}
+                                    disabled={detallePrinting}
+                                    className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium transition-colors border ${
+                                        detallePrintOk
+                                            ? 'bg-green-50 border-green-200 text-green-700'
+                                            : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                                    } disabled:opacity-50`}
+                                >
+                                    {detallePrinting
+                                        ? <><Loader2 className="w-4 h-4 animate-spin" />Imprimiendo...</>
+                                        : detallePrintOk
+                                            ? <><Check className="w-4 h-4" />Ticket enviado</>
+                                            : <><Printer className="w-4 h-4" />Imprimir ticket</>
+                                    }
+                                </button>
+                                {isAndroid && (
+                                    <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                                        Requiere{' '}
+                                        <a href="https://play.google.com/store/apps/details?id=ru.a402d.rawbtprinter" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">RawBT Print Service</a>{' '}con la Bixolon vinculada por Bluetooth.
+                                    </p>
+                                )}
+                                {detallePrintError && (
+                                    <p className="text-red-600 text-xs flex items-center gap-1">
+                                        <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />{detallePrintError}
+                                    </p>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
@@ -3671,7 +4071,7 @@ export default function Autoventa() {
                         })}
                     </div>
 
-                    {/* Total + Cobrar + Editar */}
+                    {/* Total + Cobrar + Editar + Imprimir */}
                     <div className="px-5 py-4 border-t border-slate-100 flex-shrink-0 space-y-3">
                         <div className="flex items-center justify-between">
                             <span className="text-sm font-semibold text-slate-600">Total albarán</span>
@@ -3702,6 +4102,42 @@ export default function Autoventa() {
                                     <Check className="w-4 h-4" />Cobrar
                                 </button>
                             </div>
+                        )}
+                        {/* Botón imprimir */}
+                        <button
+                            onClick={() => handlePrintDoc({
+                                tipodoc_label: detalleAlbaran.tipodoc === 4 ? 'Albarán' : detalleAlbaran.tipodoc === 2 ? 'Pedido' : 'Factura',
+                                serie: detalleAlbaran.serie,
+                                numero: detalleAlbaran.numero,
+                                fecha: detalleAlbaran.fecha,
+                                cli_nombre: detalleAlbaran.cli_nombre,
+                                total: detalleAlbaran.total,
+                                lineas: detalleAlbaran.lineas,
+                            })}
+                            disabled={detallePrinting}
+                            className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
+                                detallePrintOk
+                                    ? 'bg-green-50 border-green-200 text-green-700'
+                                    : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                            } disabled:opacity-50`}
+                        >
+                            {detallePrinting
+                                ? <><Loader2 className="w-4 h-4 animate-spin" />Imprimiendo...</>
+                                : detallePrintOk
+                                    ? <><Check className="w-4 h-4" />Ticket enviado a impresora</>
+                                    : <><Printer className="w-4 h-4" />Imprimir ticket</>
+                            }
+                        </button>
+                        {isAndroid && (
+                            <p className="text-[11px] text-slate-400 leading-snug">
+                                Requiere{' '}
+                                <a href="https://play.google.com/store/apps/details?id=ru.a402d.rawbtprinter" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">RawBT Print Service</a>{' '}con la Bixolon vinculada por Bluetooth.
+                            </p>
+                        )}
+                        {detallePrintError && (
+                            <p className="text-red-600 text-xs flex items-center gap-1">
+                                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />{detallePrintError}
+                            </p>
                         )}
                     </div>
                 </div>
@@ -3739,108 +4175,236 @@ export default function Autoventa() {
             </div>
         )}
 
-        {/* ── Modal Arqueo ── */}
-        {showArqueoModal && (
+        {/* ── Modal Liquidación ── */}
+        {showLiquidacionModal && (
             <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center pt-4 px-2 pb-6 overflow-y-auto">
                 <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
-                        <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                            <BarChart2 className="w-4 h-4 text-indigo-600" /> Arqueo de cobros
-                        </h2>
-                        <button onClick={() => setShowArqueoModal(false)} className="p-1 rounded hover:bg-slate-100">
+                        <div className="flex flex-col gap-0.5">
+                            <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                <BarChart2 className="w-4 h-4 text-indigo-600" />
+                                Liquidación{agenteNombre ? ` — Agente ${agenteNombre}` : ''}
+                            </h2>
+                            {liqDesde && liqHasta && (
+                                <span className="text-xs text-slate-400 pl-6">
+                                    {liqDesde === liqHasta
+                                        ? new Date(liqDesde + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                        : `Del ${new Date(liqDesde + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })} al ${new Date(liqHasta + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })}`}
+                                </span>
+                            )}
+                        </div>
+                        <button onClick={() => setShowLiquidacionModal(false)} className="p-1 rounded hover:bg-slate-100">
                             <X className="w-5 h-5 text-slate-500" />
                         </button>
                     </div>
-                    {/* Filtros */}
-                    <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap gap-2 items-end">
-                        {(['hoy', 'semana', 'mes', 'avanzado'] as ArqueoFiltro[]).map(f => (
-                            <button key={f}
-                                onClick={() => { setArqueoFiltro(f); if (f !== 'avanzado') cargarArqueo(f) }}
-                                className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${arqueoFiltro === f ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}>
+
+                    {/* Filtros de fecha */}
+                    <div className="px-4 py-2 border-b border-slate-200 flex flex-wrap gap-2 items-center">
+                        {(['hoy', 'semana', 'mes', 'avanzado'] as const).map(f => (
+                            <button
+                                key={f}
+                                onClick={() => {
+                                    setLiqFiltro(f)
+                                    if (f !== 'avanzado') cargarLiquidacion(f)
+                                }}
+                                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                                    liqFiltro === f
+                                        ? 'bg-indigo-600 text-white border-indigo-600'
+                                        : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                                }`}
+                            >
                                 {f === 'hoy' ? 'Hoy' : f === 'semana' ? 'Esta semana' : f === 'mes' ? 'Este mes' : 'Avanzado'}
                             </button>
                         ))}
-                        {arqueoFiltro === 'avanzado' && (
+                        {liqFiltro === 'avanzado' && (
                             <>
-                                <input type="date" value={arqueoDesde} onChange={e => setArqueoDesde(e.target.value)}
-                                    className="input text-xs py-1 w-36" />
+                                <input
+                                    type="date"
+                                    value={liqDesde}
+                                    onChange={e => setLiqDesde(e.target.value)}
+                                    className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                />
                                 <span className="text-xs text-slate-400">—</span>
-                                <input type="date" value={arqueoHasta} onChange={e => setArqueoHasta(e.target.value)}
-                                    className="input text-xs py-1 w-36" />
-                                <button onClick={() => cargarArqueo('avanzado', arqueoDesde, arqueoHasta)}
-                                    className="btn-primary text-xs py-1 px-3">Buscar</button>
+                                <input
+                                    type="date"
+                                    value={liqHasta}
+                                    onChange={e => setLiqHasta(e.target.value)}
+                                    className="border border-slate-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                />
+                                <button
+                                    onClick={() => cargarLiquidacion('avanzado', liqDesde, liqHasta)}
+                                    className="px-3 py-1 rounded-full text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                                >
+                                    Buscar
+                                </button>
                             </>
                         )}
                     </div>
+
                     {/* Contenido */}
-                    <div className="p-4 max-h-[60vh] overflow-y-auto">
-                        {arqueoLoading ? (
+                    <div className="p-4 max-h-[65vh] overflow-y-auto space-y-5">
+                        {liqLoading ? (
                             <div className="flex justify-center py-10">
                                 <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
                             </div>
-                        ) : arqueoError ? (
-                            <p className="text-red-600 text-sm text-center py-6">{arqueoError}</p>
-                        ) : arqueoLineas.length === 0 ? (
-                            <p className="text-slate-400 text-sm text-center py-10">Sin cobros en el período seleccionado</p>
+                        ) : liqError ? (
+                            <p className="text-red-600 text-sm text-center py-6">{liqError}</p>
                         ) : (
-                            <table className="w-full text-xs">
-                                <thead>
-                                    <tr className="border-b border-slate-200 text-slate-500">
-                                        <th className="text-left py-2 pr-2 font-medium">Fecha</th>
-                                        <th className="text-left py-2 pr-2 font-medium">Documento</th>
-                                        <th className="text-left py-2 pr-2 font-medium">Cliente</th>
-                                        <th className="text-right py-2 pr-2 font-medium">Haber</th>
-                                        <th className="text-right py-2 pr-2 font-medium">Debe</th>
-                                        <th className="text-right py-2 font-medium">Saldo</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {arqueoLineas.map(l => (
-                                        <tr key={l.id} className="hover:bg-slate-50">
-                                            <td className="py-2 pr-2 text-slate-400 whitespace-nowrap">
-                                                {l.fecha ? new Date(l.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : '—'}
-                                            </td>
-                                            <td className="py-2 pr-2 font-mono font-semibold text-indigo-700 whitespace-nowrap">
-                                                {l.serie && l.numero ? `${l.serie}-${l.numero}` : (l.concepto || '—')}
-                                            </td>
-                                            <td className="py-2 pr-2 text-slate-700">{l.cli_nombre || '—'}</td>
-                                            <td className="py-2 pr-2 text-right text-green-700 font-medium">
-                                                {l.ingreso > 0 ? l.ingreso.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
-                                            </td>
-                                            <td className="py-2 pr-2 text-right text-red-600">
-                                                {l.reintegro > 0 ? l.reintegro.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
-                                            </td>
-                                            <td className="py-2 text-right font-bold text-slate-800">
-                                                {l.saldo.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                            <>
+                                {/* Documentos del período */}
+                                <div>
+                                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                                        {liqFiltro === 'hoy' ? 'Documentos de hoy' : 'Documentos del período'}
+                                    </p>
+                                    {liqDocsHoy.length === 0 ? (
+                                        <p className="text-slate-400 text-xs text-center py-4">
+                                            {liqFiltro === 'hoy' ? 'Sin documentos creados hoy' : 'Sin documentos en el período'}
+                                        </p>
+                                    ) : (
+                                        <table className="w-full text-xs">
+                                            <thead>
+                                                <tr className="border-b border-slate-200 text-slate-500">
+                                                    <th className="text-left py-2 pr-2 font-medium">Tipo</th>
+                                                    <th className="text-left py-2 pr-2 font-medium">Documento</th>
+                                                    <th className="text-left py-2 pr-2 font-medium">Cliente</th>
+                                                    <th className="text-right py-2 pr-2 font-medium">Total</th>
+                                                    <th className="text-right py-2 pr-2 font-medium">Cobrado</th>
+                                                    <th className="text-right py-2 font-medium">Pendiente</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-50">
+                                                {liqDocsHoy.map(d => {
+                                                    const parcial = d.cobrado > 0.01 && d.pendiente > 0.01
+                                                    const totCobrado = d.pendiente <= 0.01
+                                                    return (
+                                                    <tr key={d.id} className={`hover:bg-slate-50 ${parcial ? 'bg-amber-50/60' : ''}`}>
+                                                        <td className="py-2 pr-2">
+                                                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${d.tipodoc === 2 ? 'bg-blue-50 text-blue-700' : d.tipodoc === 4 ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'}`}>
+                                                                {d.tipodoc_label}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-2 pr-2 font-mono font-semibold text-indigo-700 whitespace-nowrap">
+                                                            {d.serie}-{d.numero}
+                                                        </td>
+                                                        <td className="py-2 pr-2 text-slate-700">{d.cli_nombre}</td>
+                                                        <td className="py-2 pr-2 text-right font-medium text-slate-800">
+                                                            {d.total.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </td>
+                                                        <td className="py-2 pr-2 text-right">
+                                                            {d.cobrado > 0.01 ? (
+                                                                <span className="text-green-700 font-semibold">
+                                                                    {d.cobrado.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-slate-300">—</span>
+                                                            )}
+                                                        </td>
+                                                        <td className="py-2 text-right whitespace-nowrap">
+                                                            {totCobrado ? (
+                                                                <span className="inline-flex items-center gap-0.5 text-green-600 font-semibold">
+                                                                    <Check className="w-3 h-3" /> Cobrado
+                                                                </span>
+                                                            ) : parcial ? (
+                                                                <span className="inline-flex flex-col items-end gap-0">
+                                                                    <span className="text-red-600 font-bold">
+                                                                        {d.pendiente.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                    </span>
+                                                                    <span className="text-[10px] text-amber-600 font-medium">parcial</span>
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-red-500 font-medium">
+                                                                    {d.total.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                                </span>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                    )
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                    {liqDocsHoy.length > 0 && (
+                                        <div className="flex justify-end gap-4 text-xs mt-2 text-slate-500">
+                                            <span>Total ventas: <strong className="text-slate-800">{liqTotalVentas.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€</strong></span>
+                                            <span>Cobrado hoy: <strong className="text-green-700">{liqTotalCobradoHoy.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€</strong></span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Cobros de docs de otros días */}
+                                {liqCobrosOtros.length > 0 && (
+                                    <div>
+                                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Cobros de documentos anteriores</p>
+                                        <table className="w-full text-xs">
+                                            <thead>
+                                                <tr className="border-b border-slate-200 text-slate-500">
+                                                    <th className="text-left py-2 pr-2 font-medium">Fecha doc.</th>
+                                                    <th className="text-left py-2 pr-2 font-medium">Documento</th>
+                                                    <th className="text-left py-2 pr-2 font-medium">Cliente</th>
+                                                    <th className="text-right py-2 font-medium">Ingreso</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-50">
+                                                {liqCobrosOtros.map(c => (
+                                                    <tr key={c.id} className="hover:bg-slate-50">
+                                                        <td className="py-2 pr-2 text-slate-400 whitespace-nowrap">
+                                                            {c.fecha_doc ? new Date(c.fecha_doc + 'T00:00:00').toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : '—'}
+                                                        </td>
+                                                        <td className="py-2 pr-2 font-mono font-semibold text-indigo-700 whitespace-nowrap">
+                                                            {c.serie && c.numero ? `${c.serie}-${c.numero}` : (c.concepto || '—')}
+                                                        </td>
+                                                        <td className="py-2 pr-2 text-slate-700">{c.cli_nombre || '—'}</td>
+                                                        <td className="py-2 text-right text-green-700 font-medium">
+                                                            {c.ingreso.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                        <div className="flex justify-end mt-2 text-xs">
+                                            <span className="text-slate-500">Total cobros anteriores: <strong className="text-green-700">{liqTotalCobrosOtros.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€</strong></span>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
-                    {/* Totales */}
-                    {arqueoLineas.length > 0 && (
-                        <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between flex-wrap gap-2 bg-slate-50 rounded-b-2xl">
-                            <div className="flex gap-4 text-sm">
-                                <span className="text-green-700 font-medium">
-                                    Total cobrado: {arqueoTotalIngreso.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€
+
+                    {/* Footer con totales y botón email */}
+                    {!liqLoading && !liqError && (
+                        <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 rounded-b-2xl space-y-2">
+                            <div className="flex items-center justify-between flex-wrap gap-3">
+                                <span className="text-sm text-slate-600">
+                                    Total cobrado hoy: <strong className="text-green-700">{(liqTotalCobradoHoy + liqTotalCobrosOtros).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€</strong>
                                 </span>
-                                {arqueoTotalReintegro > 0 && (
-                                    <span className="text-red-600">
-                                        Reintegros: {arqueoTotalReintegro.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€
-                                    </span>
-                                )}
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <input
+                                        type="email"
+                                        value={liqEmailDest}
+                                        onChange={e => { setLiqEmailDest(e.target.value); setLiqEmailMsg('') }}
+                                        placeholder="Dirección de email"
+                                        className="input text-xs py-1.5 w-52"
+                                    />
+                                    <button
+                                        onClick={enviarLiquidacionEmail}
+                                        disabled={liqEmailSending || liqDocsHoy.length === 0 || !liqEmailDest.trim()}
+                                        className="flex items-center gap-2 text-sm font-medium text-white bg-indigo-600 px-4 py-2 rounded-xl hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {liqEmailSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                                        Enviar
+                                    </button>
+                                </div>
                             </div>
-                            <span className="text-base font-bold text-slate-800">
-                                Saldo: {arqueoSaldoFinal.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€
-                            </span>
+                            {liqEmailMsg && (
+                                <p className={`text-xs ${liqEmailMsg.startsWith('Email') ? 'text-green-600' : 'text-red-600'}`}>{liqEmailMsg}</p>
+                            )}
                         </div>
                     )}
                 </div>
             </div>
         )}
+
         </>
     )
 }

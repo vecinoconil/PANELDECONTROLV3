@@ -1854,8 +1854,12 @@ def clientes_agente(
 
 import smtplib
 import ssl
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+from app.models.app_models import Local as LocalModel
+from app.services.pdf_docs import generate_pdf
 
 
 class EnviarDocumentoRequest(BaseModel):
@@ -1863,6 +1867,7 @@ class EnviarDocumentoRequest(BaseModel):
     idcab: int
     tipodoc: int
     email_destino: str
+    local_id: Optional[int] = None
 
 
 @router.post("/enviar-documento")
@@ -1872,12 +1877,19 @@ def enviar_documento(
     current_user: Usuario = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    """Sends a document summary email to the client."""
+    """Sends a document email to the client with PDF attachment."""
     _require_autoventa(current_user)
+
+    # Resolve local for SMTP config + formato_doc
+    local = None
+    if body.local_id:
+        local = session.get(LocalModel, body.local_id)
+
     conn = None
     try:
+        import psycopg2.extras
         conn = get_pg_connection(empresa)
-        cur = conn.cursor()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
         cur.execute(
             """
@@ -1898,48 +1910,43 @@ def enviar_documento(
         )
         lineas = cur.fetchall()
 
-        tipo_label = {2: "Pedido", 4: "Albar\u00e1n", 8: "Factura"}.get(body.tipodoc, "Documento")
+        tipo_label = {2: "Pedido", 4: "Albarán", 8: "Factura"}.get(body.tipodoc, "Documento")
         empresa_nombre = empresa.nombre
 
-        lineas_html = "".join(
-            f"<tr>"
-            f"<td style='padding:6px 10px;border-bottom:1px solid #eee'>{l['descripcion']}</td>"
-            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{float(l['unidades']):.2f}</td>"
-            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{float(l['precio']):.2f}\u20ac</td>"
-            f"<td style='padding:6px 10px;border-bottom:1px solid #eee;text-align:right'>{float(l['importe']):.2f}\u20ac</td>"
-            f"</tr>"
-            for l in lineas
-        )
+        # SMTP config: prefer local, fallback to empresa
+        smtp_host = (local.smtp_host if local else None) or empresa.smtp_host or "smtp.ionos.es"
+        smtp_port = (local.smtp_port if local and local.smtp_host else None) or empresa.smtp_port or 465
+        smtp_user = (local.smtp_user if local else None) or empresa.smtp_user or "solbabi@solba.com"
+        smtp_pass = (local.smtp_password if local else None) or empresa.smtp_password or "Solba2012@"
+        from_name = (local.smtp_from_name if local else None) or empresa.smtp_from_name or empresa_nombre
 
+        # PDF generation
+        formato = (local.formato_doc if local else None) or "a4_basico_logo_izq"
+        doc_dict = dict(doc)
+        lineas_list = [dict(l) for l in lineas]
+        pdf_bytes = generate_pdf(formato, doc_dict, lineas_list, conn)
+        nombre_pdf = f"{tipo_label}_{doc['serie']}_{doc['numero']}.pdf"
+
+        # Email body
         html = (
             "<html><body style='font-family:Arial,sans-serif;color:#333;max-width:600px;margin:auto;padding:24px'>"
-            f"<h2 style='color:#0056b3'>{empresa_nombre} \u2013 {tipo_label} {doc['serie']}-{doc['numero']}</h2>"
+            f"<h2 style='color:#0056b3'>{empresa_nombre}</h2>"
             f"<p>Estimado/a <strong>{doc['cli_nombre_full']}</strong>,</p>"
-            f"<p>Le enviamos la copia de su {tipo_label.lower()} con fecha <strong>{doc['fecha']}</strong>.</p>"
-            "<table style='width:100%;border-collapse:collapse;margin:16px 0;font-size:13px'>"
-            "<thead><tr style='background:#f4f6f9'>"
-            "<th style='padding:8px 10px;text-align:left;border-bottom:2px solid #dde3ec'>Descripci\u00f3n</th>"
-            "<th style='padding:8px 10px;text-align:right;border-bottom:2px solid #dde3ec'>Uds</th>"
-            "<th style='padding:8px 10px;text-align:right;border-bottom:2px solid #dde3ec'>Precio</th>"
-            "<th style='padding:8px 10px;text-align:right;border-bottom:2px solid #dde3ec'>Importe</th>"
-            "</tr></thead>"
-            f"<tbody>{lineas_html}</tbody></table>"
-            f"<p style='text-align:right;font-size:15px;font-weight:bold'>Total: {float(doc['total']):.2f}\u20ac</p>"
+            f"<p>Adjunto encontrará la copia de su {tipo_label.lower()} "
+            f"<strong>{doc['serie']}-{doc['numero']}</strong> con fecha <strong>{doc['fecha']}</strong>.</p>"
             f"<p style='color:#888;font-size:12px;margin-top:24px'>{empresa_nombre}</p>"
             "</body></html>"
         )
 
-        smtp_host = empresa.smtp_host or "smtp.ionos.es"
-        smtp_port = empresa.smtp_port or 465
-        smtp_user = empresa.smtp_user or "solbabi@solba.com"
-        smtp_pass = empresa.smtp_password or "Solba2012@"
-        from_name = empresa.smtp_from_name or empresa_nombre
-
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"{tipo_label} {doc['serie']}-{doc['numero']} \u2013 {empresa_nombre}"
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = f"{tipo_label} {doc['serie']}-{doc['numero']} – {empresa_nombre}"
         msg["From"] = f"{from_name} <{smtp_user}>"
         msg["To"] = body.email_destino
         msg.attach(MIMEText(html, "html"))
+
+        pdf_part = MIMEApplication(pdf_bytes, _subtype="pdf")
+        pdf_part.add_header("Content-Disposition", "attachment", filename=nombre_pdf)
+        msg.attach(pdf_part)
 
         ctx = ssl.create_default_context()
         with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx) as smtp:
@@ -1955,7 +1962,6 @@ def enviar_documento(
     finally:
         if conn:
             conn.close()
-
 
 # ── Mis documentos ────────────────────────────────────────────────────────
 
@@ -2352,3 +2358,290 @@ def mis_visitas(
         }
         for v in visitas
     ]
+
+
+# ── Liquidación del agente (documentos del día + cobros) ─────────────────
+
+@router.get("/liquidacion")
+def liquidacion(
+    desde: Optional[str] = Query(None),
+    hasta: Optional[str] = Query(None),
+    empresa: Empresa = Depends(get_empresa_from_local),
+    current_user: Usuario = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """
+    Liquidación del agente para un rango de fechas (por defecto hoy).
+    - docs_periodo: documentos (pedidos/albaranes/facturas) creados en el periodo por el agente.
+    - cobros_otros_dias: cobros en caja dentro del periodo que corresponden a docs de fechas anteriores al periodo.
+    - totales
+    """
+    _require_autoventa(current_user)
+    agente = current_user.agente_autoventa
+    caja_id = current_user.caja_autoventa or 0
+    user_id = current_user.id
+    hoy = date.today().isoformat()
+    fecha_desde = desde or hoy
+    fecha_hasta = hasta or hoy
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+
+        # ── Documentos creados en el periodo por el agente ────────────
+        agente_filter = "AND vc.agente = %(agente)s" if agente else ""
+        cur.execute(f"""
+            SELECT vc.id, vc.tipodoc, vc.serie, vc.numero, vc.fecha,
+                   vc.cli_codigo, vc.cli_nombre, vc.total,
+                   COALESCE(SUM(e.importe), 0)::numeric AS cobrado
+            FROM ventas_cabeceras vc
+            LEFT JOIN ventas_entregas e ON e.idcab = vc.id
+            WHERE vc.fecha BETWEEN %(desde)s AND %(hasta)s
+              AND vc.tipodoc IN (2, 4, 8)
+              {agente_filter}
+            GROUP BY vc.id, vc.tipodoc, vc.serie, vc.numero, vc.fecha,
+                     vc.cli_codigo, vc.cli_nombre, vc.total
+            ORDER BY vc.fecha ASC, vc.tipodoc ASC, vc.id ASC
+        """, {"desde": fecha_desde, "hasta": fecha_hasta, "agente": agente})
+        docs_hoy = []
+        for r in cur.fetchall():
+            total = float(r["total"] or 0)
+            cobrado = float(r["cobrado"] or 0)
+            docs_hoy.append({
+                "id": r["id"],
+                "tipodoc": r["tipodoc"],
+                "tipodoc_label": TIPODOC_LABELS.get(r["tipodoc"], "Doc"),
+                "serie": r["serie"] or "",
+                "numero": r["numero"],
+                "fecha": r["fecha"].isoformat() if r["fecha"] else fecha_desde,
+                "cli_codigo": r["cli_codigo"],
+                "cli_nombre": r["cli_nombre"] or "",
+                "total": total,
+                "cobrado": round(cobrado, 2),
+                "pendiente": round(total - cobrado, 2),
+            })
+
+        # ── Cobros en el periodo correspondientes a docs anteriores ──
+        cobros_otros = []
+        if caja_id:
+            agente_cobros_filter = "AND (vc.agente = %(agente)s OR vc.id IS NULL)" if agente else ""
+            cur.execute(f"""
+                SELECT cr.id, cr.fecha, cr.concepto, cr.ingreso, cr.reintegro,
+                       vc.serie, vc.numero, vc.fecha AS fecha_doc,
+                       COALESCE(vc.cli_nombre, c.nombre) AS cli_nombre,
+                       COALESCE(vc.id, ve.idcab) AS idcab
+                FROM cajas_registro cr
+                LEFT JOIN ventas_entregas ve ON ve.idregistro = cr.id
+                LEFT JOIN ventas_cabeceras vc ON vc.id = ve.idcab
+                LEFT JOIN clientes c ON c.codigo = cr.idsujeto AND cr.tiposujeto = 1
+                WHERE cr.usuario = %(user)s
+                  AND cr.codigo = %(caja)s
+                  AND cr.fecha BETWEEN %(desde)s AND %(hasta)s
+                  AND cr.es_entrega_alb IN (0, 1)
+                  AND cr.ingreso > 0
+                  AND (vc.fecha IS NULL OR vc.fecha < %(desde)s)
+                  {agente_cobros_filter}
+                ORDER BY cr.fecha ASC, cr.id ASC
+            """, {"user": user_id, "caja": caja_id, "desde": fecha_desde, "hasta": fecha_hasta, "agente": agente})
+            for r in cur.fetchall():
+                cobros_otros.append({
+                    "id": r["id"],
+                    "concepto": r["concepto"] or "",
+                    "serie": r["serie"] or "",
+                    "numero": r["numero"],
+                    "fecha_doc": r["fecha_doc"].isoformat() if r["fecha_doc"] else None,
+                    "cli_nombre": r["cli_nombre"] or "",
+                    "ingreso": float(r["ingreso"] or 0),
+                    "reintegro": float(r["reintegro"] or 0),
+                })
+
+        total_ventas = sum(d["total"] for d in docs_hoy)
+        total_cobrado_hoy = sum(d["cobrado"] for d in docs_hoy)
+        total_cobros_otros = sum(c["ingreso"] - c["reintegro"] for c in cobros_otros)
+
+        return {
+            "fecha": fecha_hasta,
+            "desde": fecha_desde,
+            "hasta": fecha_hasta,
+            "docs_hoy": docs_hoy,
+            "cobros_otros_dias": cobros_otros,
+            "total_ventas": round(total_ventas, 2),
+            "total_cobrado_hoy": round(total_cobrado_hoy, 2),
+            "total_cobros_otros_dias": round(total_cobros_otros, 2),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error BD: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ── Enviar liquidación por email ──────────────────────────────────────────
+
+class EnviarLiquidacionRequest(BaseModel):
+    fecha: str
+    docs_hoy: list[dict]
+    cobros_otros_dias: list[dict]
+    total_ventas: float
+    total_cobrado_hoy: float
+    total_cobros_otros_dias: float
+    email_destino: Optional[str] = None
+
+
+@router.post("/enviar-liquidacion")
+def enviar_liquidacion(
+    body: EnviarLiquidacionRequest,
+    empresa: Empresa = Depends(get_empresa_from_local),
+    current_user: Usuario = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    """Envía la liquidación por email al agente usando SMTP de la tabla empresa del ERP."""
+    _require_autoventa(current_user)
+
+    to = (body.email_destino or "").strip() or current_user.email
+    if not to:
+        raise HTTPException(status_code=400, detail="No se ha especificado dirección de email")
+
+    # ── Leer config SMTP del ERP (tabla empresa) + nombre agente ─────────
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT nombre, smtp_servidor, smtp_puerto, smtp_ssl, "
+            "       smtp_usuario, smtp_password FROM empresa LIMIT 1"
+        )
+        erp_emp = cur.fetchone()
+        # Nombre del agente ERP
+        agente_codigo = current_user.agente_autoventa
+        nombre_agente = current_user.nombre  # fallback
+        if agente_codigo:
+            cur.execute("SELECT nombre FROM agentes WHERE codigo = %s", (agente_codigo,))
+            row = cur.fetchone()
+            if row:
+                nombre_agente = row["nombre"]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error leyendo config ERP: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+    if not erp_emp or not erp_emp["smtp_servidor"] or not erp_emp["smtp_usuario"]:
+        raise HTTPException(
+            status_code=400,
+            detail="El servidor de email no está configurado en la empresa ERP. Contacte con el administrador."
+        )
+
+    smtp_host = erp_emp["smtp_servidor"]
+    smtp_port = int(erp_emp["smtp_puerto"] or 587)
+    smtp_user = erp_emp["smtp_usuario"]
+    smtp_password = erp_emp["smtp_password"] or ""
+    from_name = erp_emp["nombre"] or empresa.nombre
+
+    # ── Generar HTML ──────────────────────────────────────────────────────
+    fmt_eur = lambda v: f"{v:,.2f}€".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    filas_docs = ""
+    for d in body.docs_hoy:
+        total = d.get('total', 0)
+        cobrado = d.get('cobrado', 0)
+        pendiente = d.get('pendiente', total)
+        parcial = cobrado > 0.01 and pendiente > 0.01
+        tot_cobrado = pendiente <= 0.01
+        if tot_cobrado:
+            cobrado_col = f'<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#16a34a;font-weight:bold">{fmt_eur(cobrado)}</td>'
+            estado_col = '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#16a34a;font-weight:bold">&#10003; Cobrado</td>'
+            row_bg = ""
+        elif parcial:
+            cobrado_col = f'<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#16a34a;font-weight:bold">{fmt_eur(cobrado)}</td>'
+            estado_col = f'<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right"><span style="color:#dc2626;font-weight:bold">{fmt_eur(pendiente)}</span><br/><span style="color:#d97706;font-size:11px">parcial</span></td>'
+            row_bg = 'background:#fffbeb;'
+        else:
+            cobrado_col = '<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#cbd5e1">—</td>'
+            estado_col = f'<td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#dc2626;font-weight:bold">{fmt_eur(pendiente)}</td>'
+            row_bg = ""
+        filas_docs += f"""
+        <tr style="{row_bg}">
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0">{d.get('tipodoc_label','')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-family:monospace">{d.get('serie','')}-{d.get('numero','')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0">{d.get('cli_nombre','')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right">{fmt_eur(total)}</td>
+          {cobrado_col}
+          {estado_col}
+        </tr>"""
+
+    filas_cobros = ""
+    for c in body.cobros_otros_dias:
+        doc_ref = f"{c.get('serie','')}-{c.get('numero','')}" if c.get('numero') else c.get('concepto', '')
+        filas_cobros += f"""
+        <tr>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0">{c.get('fecha_doc') or '—'}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-family:monospace">{doc_ref}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0">{c.get('cli_nombre','')}</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:right;color:#16a34a">{fmt_eur(c.get('ingreso',0))}</td>
+        </tr>"""
+
+    cobros_section = ""
+    if body.cobros_otros_dias:
+        cobros_section = f"""
+        <h3 style="color:#475569;font-size:14px;margin:20px 0 6px">Cobros de documentos anteriores</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:#f1f5f9;color:#64748b">
+            <th style="padding:6px 8px;text-align:left">Fecha doc.</th>
+            <th style="padding:6px 8px;text-align:left">Documento</th>
+            <th style="padding:6px 8px;text-align:left">Cliente</th>
+            <th style="padding:6px 8px;text-align:right">Cobrado</th>
+          </tr></thead>
+          <tbody>{filas_cobros}</tbody>
+        </table>
+        <p style="text-align:right;font-size:13px;color:#16a34a;margin-top:6px">
+          <strong>Total cobros anteriores: {fmt_eur(body.total_cobros_otros_dias)}</strong>
+        </p>"""
+
+    html = f"""<html>
+<body style="font-family:Arial,sans-serif;color:#334155;max-width:620px;margin:auto;padding:24px">
+  <h2 style="color:#1e40af;margin-bottom:4px">Liquidación de {body.fecha}</h2>
+  <p style="color:#64748b;margin-top:0">Agente: <strong>{nombre_agente}</strong></p>
+
+  <h3 style="color:#475569;font-size:14px;margin-bottom:6px">Documentos creados hoy</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="background:#f1f5f9;color:#64748b">
+      <th style="padding:6px 8px;text-align:left">Tipo</th>
+      <th style="padding:6px 8px;text-align:left">Doc.</th>
+      <th style="padding:6px 8px;text-align:left">Cliente</th>
+      <th style="padding:6px 8px;text-align:right">Total</th>
+      <th style="padding:6px 8px;text-align:right">Cobrado</th>
+      <th style="padding:6px 8px;text-align:right">Pendiente</th>
+    </tr></thead>
+    <tbody>{filas_docs}</tbody>
+  </table>
+  <p style="text-align:right;font-size:13px;color:#1d4ed8;margin-top:6px">
+    <strong>Total ventas: {fmt_eur(body.total_ventas)}</strong> &nbsp;|&nbsp;
+    <strong style="color:#16a34a">Cobrado: {fmt_eur(body.total_cobrado_hoy)}</strong>
+  </p>
+
+  {cobros_section}
+
+  <hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0"/>
+  <p style="font-size:13px;color:#64748b;text-align:right">
+    <strong>Total general cobrado: {fmt_eur(body.total_cobrado_hoy + body.total_cobros_otros_dias)}</strong>
+  </p>
+</body>
+</html>"""
+
+    from app.services.email import send_with_empresa_smtp
+    try:
+        send_with_empresa_smtp(
+            to=to,
+            subject=f"Liquidación {nombre_agente} — {body.fecha}",
+            html=html,
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+            smtp_user=smtp_user,
+            smtp_password=smtp_password,
+            from_name=from_name,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error enviando email: {e}")
+
+    return {"ok": True, "to": to}

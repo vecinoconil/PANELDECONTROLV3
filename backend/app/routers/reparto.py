@@ -4,6 +4,7 @@ Los repartidores ven sus hojas de carga asignadas, marcan documentos
 como servido/pagado con importe cobrado, y pueden consultar el arqueo.
 """
 import json as _json
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -30,6 +31,11 @@ class LineaEstadoUpdate(BaseModel):
     importe_cobrado: Optional[float] = None
 
 
+class FirmaUpdate(BaseModel):
+    firma_b64: str  # imagen PNG en base64 (data:image/png;base64,...)
+    linea_id: int
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _ensure_reparto_cols(conn):
@@ -38,6 +44,7 @@ def _ensure_reparto_cols(conn):
     cur.execute("ALTER TABLE hojas_de_carga_lineas ADD COLUMN IF NOT EXISTS servido BOOLEAN DEFAULT FALSE")
     cur.execute("ALTER TABLE hojas_de_carga_lineas ADD COLUMN IF NOT EXISTS pagado BOOLEAN DEFAULT FALSE")
     cur.execute("ALTER TABLE hojas_de_carga_lineas ADD COLUMN IF NOT EXISTS importe_cobrado NUMERIC(12,2) DEFAULT 0")
+    cur.execute("ALTER TABLE hojas_de_carga_lineas ADD COLUMN IF NOT EXISTS firma_guardada BOOLEAN DEFAULT FALSE")
     cur.execute("ALTER TABLE hojas_de_carga ADD COLUMN IF NOT EXISTS repartidor_usuario_id INTEGER")
     conn.commit()
 
@@ -55,7 +62,7 @@ def get_reparto_config(
         conn = get_pg_connection(empresa)
         cur = conn.cursor()
         cur.execute(
-            "SELECT codigo, nombre FROM cajas WHERE activo = true OR activo IS NULL ORDER BY nombre"
+            "SELECT codigo, nombre FROM cajas WHERE inactiva = false ORDER BY nombre"
         )
         cajas = [{"codigo": r["codigo"], "nombre": r["nombre"]} for r in cur.fetchall()]
         return {
@@ -167,7 +174,8 @@ def get_mi_hoja(
                    cli_localidad, fecha_doc, total, observaciones,
                    COALESCE(servido, false) AS servido,
                    COALESCE(pagado, false)  AS pagado,
-                   COALESCE(importe_cobrado, 0) AS importe_cobrado
+                   COALESCE(importe_cobrado, 0) AS importe_cobrado,
+                   COALESCE(firma_guardada, false) AS firma_guardada
             FROM hojas_de_carga_lineas
             WHERE hoja_id = %(hoja_id)s
             ORDER BY orden
@@ -192,6 +200,7 @@ def get_mi_hoja(
                 "servido": bool(l["servido"]),
                 "pagado": bool(l["pagado"]),
                 "importe_cobrado": float(l["importe_cobrado"] or 0),
+                "firma_guardada": bool(l["firma_guardada"]),
             })
 
         return {
@@ -292,6 +301,82 @@ def cerrar_hoja(
             raise HTTPException(status_code=404, detail="Hoja no encontrada o sin permiso")
         conn.commit()
         return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
+# ── Firma del documento ─────────────────────────────────────────────────────
+
+@router.post("/reparto/mis-hojas/{hoja_id}/firma")
+def guardar_firma(
+    hoja_id: int,
+    body: FirmaUpdate,
+    empresa: Empresa = Depends(get_empresa_from_local),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Guarda la firma (base64) en la cabecera del documento de ventas correspondiente a la línea."""
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+
+        # Verificar que la hoja pertenece al repartidor
+        cur.execute(
+            "SELECT repartidor_usuario_id FROM hojas_de_carga WHERE id = %(id)s AND empresa_id = %(emp)s",
+            {"id": hoja_id, "emp": empresa.id},
+        )
+        h = cur.fetchone()
+        if not h:
+            raise HTTPException(status_code=404, detail="Hoja no encontrada")
+        if h["repartidor_usuario_id"] and h["repartidor_usuario_id"] != current_user.id:
+            raise HTTPException(status_code=403, detail="Sin acceso")
+
+        # Obtener la línea para saber tipodoc, serie, numero
+        cur.execute(
+            "SELECT tipodoc, serie, numero FROM hojas_de_carga_lineas WHERE id = %(id)s AND hoja_id = %(hoja_id)s",
+            {"id": body.linea_id, "hoja_id": hoja_id},
+        )
+        linea = cur.fetchone()
+        if not linea:
+            raise HTTPException(status_code=404, detail="Línea no encontrada")
+
+        # Actualizar firma en ventas_cabeceras
+        cur.execute(
+            """
+            UPDATE ventas_cabeceras
+               SET firma = %(firma)s,
+                   hora_firma = %(hora_firma)s
+             WHERE tipodoc = %(tipodoc)s
+               AND serie   = %(serie)s
+               AND numero  = %(numero)s
+            RETURNING id
+            """,
+            {
+                "firma": body.firma_b64,
+                "hora_firma": datetime.now(),
+                "tipodoc": linea["tipodoc"],
+                "serie": linea["serie"],
+                "numero": linea["numero"],
+            },
+        )
+        resultado = cur.fetchone()
+        if not resultado:
+            raise HTTPException(status_code=404, detail="Documento no encontrado en ventas_cabeceras")
+
+        # Marcar también la línea como con firma
+        cur.execute(
+            "UPDATE hojas_de_carga_lineas SET firma_guardada = true WHERE id = %(id)s",
+            {"id": body.linea_id},
+        )
+        conn.commit()
+        return {"ok": True, "vcab_id": resultado["id"]}
     except HTTPException:
         raise
     except Exception as e:

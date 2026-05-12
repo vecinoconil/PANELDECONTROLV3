@@ -58,6 +58,12 @@ def _run_migrations():
             "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS caja_reparto INTEGER"
         ))
         conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS precargar_historial_autoventa BOOLEAN DEFAULT TRUE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS paper_width_impresora INTEGER DEFAULT 80"
+        ))
+        conn.execute(text(
             "ALTER TABLE locales ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'definitiva'"
         ))
         conn.execute(text(
@@ -65,6 +71,33 @@ def _run_migrations():
         ))
         conn.execute(text(
             "ALTER TABLE locales ADD COLUMN IF NOT EXISTS fecha_definitiva TIMESTAMP"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS asistente_ia BOOLEAN DEFAULT FALSE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS smtp_host VARCHAR(200)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS smtp_port INTEGER DEFAULT 465"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS smtp_user VARCHAR(200)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS smtp_password VARCHAR(200)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS smtp_from_name VARCHAR(200)"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS formato_doc VARCHAR(50) DEFAULT 'a4_basico_logo_izq'"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS portal_activo BOOLEAN DEFAULT FALSE"
+        ))
+        conn.execute(text(
+            "ALTER TABLE locales ADD COLUMN IF NOT EXISTS frx_factura VARCHAR(500)"
         ))
         conn.commit()
 

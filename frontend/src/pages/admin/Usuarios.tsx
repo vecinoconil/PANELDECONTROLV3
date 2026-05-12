@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { Users, Plus, Pencil, Trash2, Power, Eye, EyeOff, Mail, Settings } from 'lucide-react'
+import { Users, Plus, Pencil, Trash2, Power, Eye, EyeOff, Mail, Settings, Search } from 'lucide-react'
 import { PERMISOS_DISPONIBLES, hasPermiso, type PermisosMap } from '../../types'
 import { useAuth } from '../../auth/AuthContext'
 
@@ -30,8 +30,10 @@ interface Usuario {
     almacen_autoventa: number | null
     fpago_autoventa: number | null
     solo_clientes_agente: boolean
+    precargar_historial_autoventa: boolean
     serie_expediciones: string[]
     caja_reparto: number | null
+    paper_width_impresora: 80 | 100
 }
 interface UsuarioForm {
     empresa_id: number | null
@@ -49,16 +51,18 @@ interface UsuarioForm {
     almacen_autoventa: number | null
     fpago_autoventa: number | null
     solo_clientes_agente: boolean
+    precargar_historial_autoventa: boolean
     serie_expediciones: string[]
     caja_reparto: number | null
+    paper_width_impresora: 80 | 100
 }
 
-const ROLES = ['superadmin', 'gerente', 'encargado', 'usuario']
+const ROLES = ['superadmin', 'gerente', 'encargado', 'usuario', 'distribuidor']
 const emptyForm: UsuarioForm = {
     empresa_id: null, email: '', nombre: '', password: '', rol: 'usuario',
     local_ids: [], permisos: {},
-    agente_autoventa: null, serie_autoventa: null, autoventa_modifica_precio: false, tipodocs_autoventa: [], caja_autoventa: null, almacen_autoventa: null, fpago_autoventa: null, solo_clientes_agente: false,
-    serie_expediciones: [], caja_reparto: null,
+    agente_autoventa: null, serie_autoventa: null, autoventa_modifica_precio: false, tipodocs_autoventa: [], caja_autoventa: null, almacen_autoventa: null, fpago_autoventa: null, solo_clientes_agente: false, precargar_historial_autoventa: true,
+    serie_expediciones: [], caja_reparto: null, paper_width_impresora: 80,
 }
 
 export default function Usuarios() {
@@ -78,11 +82,30 @@ export default function Usuarios() {
     const [almacenesOptions, setAlmacenesOptions] = useState<AlmacenOption[]>([])
     const [fpagosOptions, setFpagosOptions] = useState<FpagoOption[]>([])
     const [loadingPgData, setLoadingPgData] = useState(false)
+    const [pgDataError, setPgDataError] = useState(false)
     const [configModal, setConfigModal] = useState<'autoventa' | 'expediciones' | 'reparto' | null>(null)
     const [configFromCheck, setConfigFromCheck] = useState(false)
     const [subError, setSubError] = useState('')
+    const [busqueda, setBusqueda] = useState('')
 
     const { user: currentUser } = useAuth()
+
+    const usuariosFiltrados = busqueda.trim()
+        ? (() => {
+            const q = busqueda.toLowerCase().trim()
+            return usuarios.filter(u => {
+                const empresa = empresas.find(e => e.id === u.empresa_id)
+                const uLocales = locales.filter(l => u.local_ids.includes(l.id))
+                return (
+                    u.nombre.toLowerCase().includes(q) ||
+                    u.email.toLowerCase().includes(q) ||
+                    u.rol.toLowerCase().includes(q) ||
+                    (empresa?.nombre ?? '').toLowerCase().includes(q) ||
+                    uLocales.some(l => l.nombre.toLowerCase().includes(q))
+                )
+            })
+          })()
+        : usuarios
 
     const fetch = async () => {
         setLoading(true)
@@ -108,6 +131,7 @@ export default function Usuarios() {
     useEffect(() => {
         if (showModal && (needsPgData || !!configModal) && form.empresa_id) {
             setLoadingPgData(true)
+            setPgDataError(false)
             Promise.all([
                 api.get<AgenteOption[]>(`/api/admin/pg-data/agentes?empresa_id=${form.empresa_id}`),
                 api.get<SerieOption[]>(`/api/admin/pg-data/series?empresa_id=${form.empresa_id}`),
@@ -116,7 +140,7 @@ export default function Usuarios() {
                 api.get<FpagoOption[]>(`/api/admin/pg-data/formaspago?empresa_id=${form.empresa_id}`),
             ])
                 .then(([a, s, c, alm, fp]) => { setAgentesOptions(a.data); setSeriesOptions(s.data); setCajasOptions(c.data); setAlmacenesOptions(alm.data); setFpagosOptions(fp.data) })
-                .catch(() => { setAgentesOptions([]); setSeriesOptions([]); setCajasOptions([]); setAlmacenesOptions([]); setFpagosOptions([]) })
+                .catch(() => { setPgDataError(true); setAgentesOptions([]); setSeriesOptions([]); setCajasOptions([]); setAlmacenesOptions([]); setFpagosOptions([]) })
                 .finally(() => setLoadingPgData(false))
         }
     }, [showModal, form.permisos, form.empresa_id, configModal])
@@ -146,8 +170,10 @@ export default function Usuarios() {
             almacen_autoventa: u.almacen_autoventa ?? null,
             fpago_autoventa: u.fpago_autoventa ?? null,
             solo_clientes_agente: u.solo_clientes_agente ?? false,
+            precargar_historial_autoventa: u.precargar_historial_autoventa ?? true,
             serie_expediciones: u.serie_expediciones ?? [],
             caja_reparto: u.caja_reparto ?? null,
+            paper_width_impresora: (u.paper_width_impresora === 100 ? 100 : 80) as 80 | 100,
         })
         setShowModal(true)
         setError('')
@@ -201,17 +227,34 @@ export default function Usuarios() {
         setSubError('')
     }
 
-    const applyAutoventa = () => {
+    const saveConfigToApi = async () => {
+        if (!editId) return
+        const payload: Record<string, unknown> = { ...form }
+        if (!payload.password) delete payload.password
+        await api.put(`/api/admin/usuarios/${editId}`, payload)
+        fetch()
+    }
+
+    const applyAutoventa = async () => {
         if (!form.agente_autoventa) { setSubError('Selecciona un agente'); return }
+        try {
+            await saveConfigToApi()
+        } catch (e: any) { setSubError(e.response?.data?.detail || 'Error guardando'); return }
         closeConfigModal(true)
     }
 
-    const applyExpediciones = () => {
+    const applyExpediciones = async () => {
         if (form.serie_expediciones.length === 0) { setSubError('Selecciona al menos una serie'); return }
+        try {
+            await saveConfigToApi()
+        } catch (e: any) { setSubError(e.response?.data?.detail || 'Error guardando'); return }
         closeConfigModal(true)
     }
 
-    const applyReparto = () => {
+    const applyReparto = async () => {
+        try {
+            await saveConfigToApi()
+        } catch (e: any) { setSubError(e.response?.data?.detail || 'Error guardando'); return }
         closeConfigModal(true)
     }
 
@@ -219,8 +262,8 @@ export default function Usuarios() {
 
     // Roles que el usuario actual puede asignar
     const availableRoles = currentUser?.rol === 'superadmin'
-        ? ['superadmin', 'gerente', 'encargado', 'usuario']
-        : ['encargado', 'usuario']
+        ? ['superadmin', 'gerente', 'encargado', 'usuario', 'distribuidor']
+        : ['encargado', 'usuario', 'distribuidor']
 
     // Permisos que el usuario actual puede asignar (solo los que él mismo tiene)
     const assignablePermisos = PERMISOS_DISPONIBLES.filter(p => {
@@ -276,12 +319,35 @@ export default function Usuarios() {
         }
     }
 
+    const saveAndSend = async () => {
+        setError('')
+        try {
+            let userId: number
+            if (editId) {
+                const payload: Record<string, unknown> = { ...form }
+                if (!payload.password) delete payload.password
+                await api.put(`/api/admin/usuarios/${editId}`, payload)
+                userId = editId
+            } else {
+                const res = await api.post<{ id: number }>('/api/admin/usuarios', form)
+                userId = res.data.id
+            }
+            setShowModal(false)
+            fetch()
+            await api.post(`/api/admin/usuarios/${userId}/send-credentials`)
+            alert('Usuario guardado y credenciales enviadas correctamente')
+        } catch (e: any) {
+            setError(e.response?.data?.detail || 'Error al guardar o enviar email')
+        }
+    }
+
     const rolBadge = (rol: string) => {
         const colors: Record<string, string> = {
             superadmin: 'bg-purple-100 text-purple-700',
             gerente: 'bg-blue-100 text-blue-700',
             encargado: 'bg-amber-100 text-amber-700',
             usuario: 'bg-slate-100 text-slate-700',
+            distribuidor: 'bg-teal-100 text-teal-700',
         }
         return colors[rol] || 'bg-slate-100 text-slate-700'
     }
@@ -293,9 +359,21 @@ export default function Usuarios() {
                     <Users className="w-5 h-5 text-brand" />
                     <h1 className="text-xl font-bold">Usuarios</h1>
                 </div>
-                <button onClick={openNew} className="btn-primary flex items-center gap-1.5">
-                    <Plus className="w-4 h-4" /> Nuevo Usuario
-                </button>
+                <div className="flex items-center gap-3">
+                    <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                        <input
+                            type="text"
+                            placeholder="Buscar por nombre, email, empresa, local..."
+                            value={busqueda}
+                            onChange={e => setBusqueda(e.target.value)}
+                            className="pl-8 pr-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand w-72"
+                        />
+                    </div>
+                    <button onClick={openNew} className="btn-primary flex items-center gap-1.5">
+                        <Plus className="w-4 h-4" /> Nuevo Usuario
+                    </button>
+                </div>
             </div>
 
             {loading ? (
@@ -316,7 +394,7 @@ export default function Usuarios() {
                             </tr>
                         </thead>
                         <tbody>
-                            {usuarios.map(u => (
+                            {usuariosFiltrados.map(u => (
                                 <tr key={u.id} className="border-b border-slate-50 hover:bg-slate-50">
                                     <td className="py-2 px-3 text-slate-400">{u.id}</td>
                                     <td className="py-2 px-3 font-medium">{u.nombre}</td>
@@ -361,8 +439,10 @@ export default function Usuarios() {
                                     </td>
                                 </tr>
                             ))}
-                            {usuarios.length === 0 && (
-                                <tr><td colSpan={8} className="py-8 text-center text-slate-400">No hay usuarios</td></tr>
+                            {usuariosFiltrados.length === 0 && (
+                                <tr><td colSpan={8} className="py-8 text-center text-slate-400">
+                                    {busqueda ? 'Sin resultados' : 'No hay usuarios'}
+                                </td></tr>
                             )}
                         </tbody>
                     </table>
@@ -401,7 +481,7 @@ export default function Usuarios() {
                             {currentUser?.rol === 'superadmin' ? (
                                 <div>
                                     <label className="block text-sm font-medium text-slate-700 mb-1">Empresa</label>
-                                    <select className="input" value={form.empresa_id || ''} onChange={e => setForm({ ...form, empresa_id: e.target.value ? +e.target.value : null, local_ids: [] })}>
+                                    <select className="input" value={form.empresa_id || ''} onChange={e => { setPgDataError(false); setForm({ ...form, empresa_id: e.target.value ? +e.target.value : null, local_ids: [] }) }}>
                                         <option value="">Sin empresa</option>
                                         {empresas.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
                                     </select>
@@ -503,6 +583,13 @@ export default function Usuarios() {
                         {error && <p className="text-red-600 text-sm mt-3">{error}</p>}
                         <div className="flex justify-end gap-2 mt-5">
                             <button onClick={() => setShowModal(false)} className="btn-ghost">Cancelar</button>
+                            <button
+                                onClick={saveAndSend}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+                            >
+                                <Mail className="w-3.5 h-3.5" />
+                                {editId ? 'Guardar y enviar' : 'Crear y enviar credenciales'}
+                            </button>
                             <button onClick={save} className="btn-primary">Guardar</button>
                         </div>
                     </div>
@@ -525,13 +612,28 @@ export default function Usuarios() {
                                     <p className="text-sm text-amber-600 mb-4">Asigna una empresa al usuario antes de configurar Autoventa.</p>
                                 ) : loadingPgData ? (
                                     <p className="text-sm text-slate-400 mb-4">Cargando datos...</p>
-                                ) : agentesOptions.length === 0 ? (
-                                    <p className="text-sm text-red-600 mb-4">No hay agentes activos en el ERP para esta empresa.</p>
                                 ) : (
                                     <div className="space-y-3">
+                                        {pgDataError && (
+                                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mb-1">
+                                                ⚠ Sin conexión al ERP — introduce los códigos manualmente.
+                                            </p>
+                                        )}
+                                        {!pgDataError && agentesOptions.length === 0 && (
+                                            <p className="text-xs text-red-600 mb-1">No hay agentes activos en el ERP para esta empresa.</p>
+                                        )}
                                         <div className="grid grid-cols-2 gap-3">
                                             <div>
                                                 <label className="block text-xs font-medium text-slate-700 mb-1">Agente <span className="text-red-500">*</span></label>
+                                                {pgDataError ? (
+                                                    <input
+                                                        type="number"
+                                                        className="input text-sm"
+                                                        placeholder="Código agente"
+                                                        value={form.agente_autoventa ?? ''}
+                                                        onChange={e => setForm(f => ({ ...f, agente_autoventa: e.target.value ? +e.target.value : null }))}
+                                                    />
+                                                ) : (
                                                 <select
                                                     className="input text-sm"
                                                     value={form.agente_autoventa ?? ''}
@@ -542,9 +644,19 @@ export default function Usuarios() {
                                                         <option key={a.codigo} value={a.codigo}>{a.nombre}</option>
                                                     ))}
                                                 </select>
+                                                )}
                                             </div>
                                             <div>
                                                 <label className="block text-xs font-medium text-slate-700 mb-1">Serie predeterminada</label>
+                                                {pgDataError ? (
+                                                    <input
+                                                        type="text"
+                                                        className="input text-sm"
+                                                        placeholder="Ej: A"
+                                                        value={form.serie_autoventa ?? ''}
+                                                        onChange={e => setForm(f => ({ ...f, serie_autoventa: e.target.value || null }))}
+                                                    />
+                                                ) : (
                                                 <select
                                                     className="input text-sm"
                                                     value={form.serie_autoventa ?? ''}
@@ -555,6 +667,7 @@ export default function Usuarios() {
                                                         <option key={s.serie} value={s.serie}>{s.serie}</option>
                                                     ))}
                                                 </select>
+                                                )}
                                             </div>
                                         </div>
                                         <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -575,11 +688,67 @@ export default function Usuarios() {
                                             />
                                             <span className="text-xs text-slate-700">Ver solo sus clientes (filtrar por agente)</span>
                                         </label>
+                                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                                            <input
+                                                type="checkbox"
+                                                className="w-4 h-4 accent-brand"
+                                                checked={form.precargar_historial_autoventa}
+                                                onChange={async e => {
+                                                    const next = e.target.checked
+                                                    if (!editId) {
+                                                        setForm(f => ({ ...f, precargar_historial_autoventa: next }))
+                                                        return
+                                                    }
+                                                    setForm(f => ({ ...f, precargar_historial_autoventa: next }))
+                                                    try {
+                                                        await api.put(`/api/admin/usuarios/${editId}`, { precargar_historial_autoventa: next })
+                                                        fetch()
+                                                    } catch (err: any) {
+                                                        setSubError(err.response?.data?.detail || 'Error guardando')
+                                                        setForm(f => ({ ...f, precargar_historial_autoventa: !next }))
+                                                    }
+                                                }}
+                                            />
+                                            <span className="text-xs text-slate-700">Precargar ventas anteriores (últimos 90 días)</span>
+                                        </label>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-700 mb-1">Ancho papel impresora térmica</label>
+                                            <div className="flex gap-2">
+                                                {([80, 100] as const).map(w => (
+                                                    <button
+                                                        key={w}
+                                                        type="button"
+                                                        onClick={async () => {
+                                                            setForm(f => ({ ...f, paper_width_impresora: w }))
+                                                            if (editId) {
+                                                                try {
+                                                                    await api.put(`/api/admin/usuarios/${editId}`, { paper_width_impresora: w })
+                                                                    fetch()
+                                                                } catch (err: any) {
+                                                                    setSubError(err.response?.data?.detail || 'Error guardando')
+                                                                    setForm(f => ({ ...f, paper_width_impresora: w === 80 ? 100 : 80 }))
+                                                                }
+                                                            }
+                                                        }}
+                                                        className={`flex-1 py-1.5 text-xs font-medium rounded-lg border transition-all ${
+                                                            form.paper_width_impresora === w
+                                                                ? 'bg-slate-700 text-white border-slate-700'
+                                                                : 'bg-white text-slate-500 border-slate-300 hover:border-slate-500'
+                                                        }`}
+                                                    >
+                                                        {w} mm
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
                                         <div>
                                             <label className="block text-xs font-medium text-slate-700 mb-1">Caja de cobros (efectivo)</label>
-                                            <select
-                                                className="input text-sm"
-                                                value={form.caja_autoventa ?? ''}
+                                            {pgDataError ? (
+                                                <input type="number" className="input text-sm" placeholder="Código caja"
+                                                    value={form.caja_autoventa ?? ''}
+                                                    onChange={e => setForm(f => ({ ...f, caja_autoventa: e.target.value ? +e.target.value : null }))} />
+                                            ) : (
+                                            <select className="input text-sm" value={form.caja_autoventa ?? ''}
                                                 onChange={e => setForm(f => ({ ...f, caja_autoventa: e.target.value ? +e.target.value : null }))}
                                             >
                                                 <option value="">— Sin caja —</option>
@@ -587,12 +756,16 @@ export default function Usuarios() {
                                                     <option key={c.codigo} value={c.codigo}>{c.nombre}</option>
                                                 ))}
                                             </select>
+                                            )}
                                         </div>
                                         <div>
                                             <label className="block text-xs font-medium text-slate-700 mb-1">Forma de pago en cobros</label>
-                                            <select
-                                                className="input text-sm"
-                                                value={form.fpago_autoventa ?? ''}
+                                            {pgDataError ? (
+                                                <input type="number" className="input text-sm" placeholder="Código forma de pago"
+                                                    value={form.fpago_autoventa ?? ''}
+                                                    onChange={e => setForm(f => ({ ...f, fpago_autoventa: e.target.value ? +e.target.value : null }))} />
+                                            ) : (
+                                            <select className="input text-sm" value={form.fpago_autoventa ?? ''}
                                                 onChange={e => setForm(f => ({ ...f, fpago_autoventa: e.target.value ? +e.target.value : null }))}
                                             >
                                                 <option value="">— Sin forma de pago —</option>
@@ -600,12 +773,16 @@ export default function Usuarios() {
                                                     <option key={fp.codigo} value={fp.codigo}>{fp.nombre}</option>
                                                 ))}
                                             </select>
+                                            )}
                                         </div>
                                         <div>
                                             <label className="block text-xs font-medium text-slate-700 mb-1">Almacén por defecto</label>
-                                            <select
-                                                className="input text-sm"
-                                                value={form.almacen_autoventa ?? ''}
+                                            {pgDataError ? (
+                                                <input type="number" className="input text-sm" placeholder="Código almacén (vacío = 1)"
+                                                    value={form.almacen_autoventa ?? ''}
+                                                    onChange={e => setForm(f => ({ ...f, almacen_autoventa: e.target.value ? +e.target.value : null }))} />
+                                            ) : (
+                                            <select className="input text-sm" value={form.almacen_autoventa ?? ''}
                                                 onChange={e => setForm(f => ({ ...f, almacen_autoventa: e.target.value ? +e.target.value : null }))}
                                             >
                                                 <option value="">— Almacén 1 (por defecto) —</option>
@@ -613,6 +790,7 @@ export default function Usuarios() {
                                                     <option key={a.codigo} value={a.codigo}>{a.codigo} — {a.nombre}</option>
                                                 ))}
                                             </select>
+                                            )}
                                         </div>
                                         <div>
                                             <p className="text-xs font-medium text-slate-700 mb-1">Tipos de documento permitidos</p>
@@ -640,7 +818,7 @@ export default function Usuarios() {
                                 {subError && <p className="text-red-600 text-xs mt-2">{subError}</p>}
                                 <div className="flex justify-end gap-2 mt-4">
                                     <button type="button" onClick={() => closeConfigModal(false)} className="btn-ghost text-sm">Cancelar</button>
-                                    {agentesOptions.length > 0 && form.empresa_id && (
+                                    {(agentesOptions.length > 0 || pgDataError) && form.empresa_id && (
                                         <button type="button" onClick={applyAutoventa} className="btn-primary text-sm">Aplicar</button>
                                     )}
                                 </div>
@@ -658,6 +836,8 @@ export default function Usuarios() {
                                     <p className="text-sm text-green-600 mb-4">Asigna una empresa al usuario antes de configurar Reparto.</p>
                                 ) : loadingPgData ? (
                                     <p className="text-sm text-slate-400 mb-4">Cargando cajas...</p>
+                                ) : pgDataError ? (
+                                    <p className="text-sm text-red-600 mb-4">Error al conectar con la base de datos del ERP. Comprueba la configuración de la empresa.</p>
                                 ) : (
                                     <div className="space-y-3">
                                         <div>
@@ -697,6 +877,8 @@ export default function Usuarios() {
                                     <p className="text-sm text-blue-600 mb-4">Asigna una empresa al usuario antes de configurar Expediciones.</p>
                                 ) : loadingPgData ? (
                                     <p className="text-sm text-slate-400 mb-4">Cargando series...</p>
+                                ) : pgDataError ? (
+                                    <p className="text-sm text-red-600 mb-4">Error al conectar con la base de datos del ERP. Comprueba la configuración de la empresa.</p>
                                 ) : (
                                     <div className="space-y-3">
                                         <div>

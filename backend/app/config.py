@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     superadmin_email: str = "admin@solba.com"
     superadmin_password: str = "padrino75"
     frontend_url: str = "http://localhost:4000"
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
 
 
 settings = Settings()

@@ -1,0 +1,56 @@
+name: Build Solba Panel APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android-app/**'
+  workflow_dispatch:   # permite lanzarlo manualmente desde GitHub Actions
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate Gradle Wrapper
+        working-directory: android-app
+        run: |
+          # Instalar gradle para generar el wrapper
+          wget -q https://services.gradle.org/distributions/gradle-8.4-bin.zip -O /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /opt/gradle
+          export PATH="/opt/gradle/gradle-8.4/bin:$PATH"
+          gradle wrapper --gradle-version=8.4 --distribution-type=bin
+          chmod +x gradlew
+
+      - name: Build Debug APK
+        working-directory: android-app
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Copy APK to backend/downloads
+        run: |
+          mkdir -p backend/downloads
+          cp android-app/app/build/outputs/apk/debug/app-debug.apk \
+             backend/downloads/solba-panel.apk
+          echo "APK size: $(du -sh backend/downloads/solba-panel.apk)"
+
+      - name: Commit APK to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backend/downloads/solba-panel.apk
+          git diff --staged --quiet && echo "No changes" || \
+            (git commit -m "chore: actualizar solba-panel.apk [skip ci]" && git push)

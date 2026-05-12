@@ -1,0 +1,39 @@
+Quiero integrar un asistente IA (Claude de Anthropic) en mi aplicación Python/FastAPI. El asistente debe:
+
+1. Recibir una pregunta en lenguaje natural del usuario vía un endpoint POST /api/asistente/chat.
+
+2. Paso 1 — Generar SQL: llamar a Claude con un prompt que incluya el esquema de la base de datos
+   y las reglas de negocio, pidiéndole que devuelva SOLO el SQL, sin markdown ni explicaciones.
+
+3. Restricción de solo lectura: antes de ejecutar el SQL, validar que la primera palabra sea SELECT.
+   Si no lo es, rechazar la consulta:
+
+       first_word = sql.strip().split()[0].upper()
+       if first_word != "SELECT":
+           raise ValueError("Solo se permiten consultas SELECT")
+
+4. Paso 2 — Ejecutar el SQL en PostgreSQL con psycopg2, resultados como lista de dicts.
+
+5. Autocorrección: si el SQL falla, hacer una segunda llamada a Claude con el error concreto
+   y el SQL fallido para que lo corrija, y reintentar una vez.
+
+6. Paso 3 — Interpretar resultados: enviar la pregunta original + el SQL ejecutado + los resultados
+   (máximo 50 filas) a Claude, pidiéndole una respuesta en lenguaje natural en español,
+   sin mencionar SQL ni detalles técnicos.
+
+7. Cliente Anthropic con SSL desactivado (para proxy corporativo):
+
+       import anthropic, httpx
+       http_client = httpx.Client(verify=False)
+       client = anthropic.Anthropic(
+           api_key="TU_ANTHROPIC_API_KEY",
+           http_client=http_client
+       )
+
+8. El modelo a usar es: claude-sonnet-4-5-20250929
+
+Implementa el endpoint completo en FastAPI con los 3 pasos, la validación SELECT-only,
+la autocorrección de SQL y la respuesta final en lenguaje natural.
+El esquema de la BD y las reglas de negocio te las proporcionaré a continuación:
+
+[PEGA AQUÍ TU ESQUEMA DE BASE DE DATOS Y REGLAS DE NEGOCIO]

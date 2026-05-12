@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
 import {
     Package, Settings, ArrowLeft, Check, CreditCard, AlertCircle,
-    Loader2, MapPin, ChevronRight, X, BarChart3, Truck, Circle, Lock
+    Loader2, MapPin, ChevronRight, X, BarChart3, Truck, Circle, Lock, PenLine
 } from 'lucide-react'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -38,6 +38,7 @@ interface LineaHoja {
     servido: boolean
     pagado: boolean
     importe_cobrado: number
+    firma_guardada: boolean
 }
 
 interface HojaDetalle {
@@ -105,6 +106,13 @@ export default function Reparto() {
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
     const [updatingLinea, setUpdatingLinea] = useState<number | null>(null)
+
+    // Firma modal
+    const [firmaModal, setFirmaModal] = useState<{ lineaId: number; hojaId: number; nombre: string } | null>(null)
+    const [savingFirma, setSavingFirma] = useState(false)
+    const canvasRef = useRef<HTMLCanvasElement>(null)
+    const isDrawing = useRef(false)
+    const lastPos = useRef<{ x: number; y: number } | null>(null)
 
     useEffect(() => {
         if (!localId) return
@@ -228,6 +236,90 @@ export default function Reparto() {
             setError('Error al cerrar la hoja')
         } finally {
             setLoading(false)
+        }
+    }
+
+    // ── FIRMA ────────────────────────────────────────────────────────────
+
+    function getCanvasPos(
+        e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>,
+        canvas: HTMLCanvasElement
+    ) {
+        const rect = canvas.getBoundingClientRect()
+        const src = 'touches' in e ? e.touches[0] : (e as React.MouseEvent)
+        return {
+            x: (src.clientX - rect.left) * (canvas.width / rect.width),
+            y: (src.clientY - rect.top) * (canvas.height / rect.height),
+        }
+    }
+
+    function startDraw(e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) {
+        if (!canvasRef.current) return
+        e.preventDefault()
+        isDrawing.current = true
+        lastPos.current = getCanvasPos(e, canvasRef.current)
+    }
+
+    const draw = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+        if (!isDrawing.current || !canvasRef.current || !lastPos.current) return
+        e.preventDefault()
+        const ctx = canvasRef.current.getContext('2d')
+        if (!ctx) return
+        const pos = getCanvasPos(e, canvasRef.current)
+        ctx.strokeStyle = '#1e293b'
+        ctx.lineWidth = 2.5
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        ctx.beginPath()
+        ctx.moveTo(lastPos.current.x, lastPos.current.y)
+        ctx.lineTo(pos.x, pos.y)
+        ctx.stroke()
+        lastPos.current = pos
+    }, [])
+
+    function stopDraw() {
+        isDrawing.current = false
+        lastPos.current = null
+    }
+
+    function clearCanvas() {
+        if (!canvasRef.current) return
+        const ctx = canvasRef.current.getContext('2d')
+        ctx?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+    }
+
+    async function saveFirma() {
+        if (!firmaModal || !canvasRef.current) return
+        const canvas = canvasRef.current
+        const ctx = canvas.getContext('2d')
+        const imgData = ctx?.getImageData(0, 0, canvas.width, canvas.height).data
+        const isBlank = !imgData || Array.from(imgData).every(v => v === 0)
+        if (isBlank) {
+            setError('Dibuja la firma antes de guardar')
+            return
+        }
+        setSavingFirma(true)
+        try {
+            const firma_b64 = canvas.toDataURL('image/png')
+            await api.post(
+                `/api/almacen/reparto/mis-hojas/${firmaModal.hojaId}/firma`,
+                { firma_b64, linea_id: firmaModal.lineaId },
+                { params: { local_id: localId } }
+            )
+            setHojaDetalle(prev => {
+                if (!prev) return prev
+                return {
+                    ...prev,
+                    lineas: prev.lineas.map(l =>
+                        l.id === firmaModal.lineaId ? { ...l, firma_guardada: true } : l
+                    ),
+                }
+            })
+            setFirmaModal(null)
+        } catch {
+            setError('Error al guardar la firma')
+        } finally {
+            setSavingFirma(false)
         }
     }
 
@@ -510,9 +602,59 @@ export default function Reparto() {
                             linea={linea}
                             updating={updatingLinea === linea.id}
                             onUpdate={(changes) => updateLinea(hojaDetalle.id, linea.id, changes)}
+                            onFirma={() => setFirmaModal({ lineaId: linea.id, hojaId: hojaDetalle.id, nombre: linea.cli_nombre })}
                         />
                     ))}
                 </div>
+
+                {/* Modal Firma */}
+                {firmaModal && (
+                    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={() => setFirmaModal(null)}>
+                        <div className="bg-white rounded-xl shadow-xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                            <div className="px-4 pt-4 pb-2 flex items-center justify-between">
+                                <div>
+                                    <p className="text-sm font-bold text-slate-800">Firma del cliente</p>
+                                    <p className="text-xs text-slate-500 truncate max-w-[220px]">{firmaModal.nombre}</p>
+                                </div>
+                                <button onClick={() => setFirmaModal(null)} className="text-slate-400 hover:text-slate-700">
+                                    <X className="w-5 h-5" />
+                                </button>
+                            </div>
+                            <div className="px-4 pb-2">
+                                <canvas
+                                    ref={canvasRef}
+                                    width={340}
+                                    height={180}
+                                    className="w-full border-2 border-dashed border-slate-300 rounded-lg bg-slate-50 touch-none cursor-crosshair"
+                                    onMouseDown={startDraw}
+                                    onMouseMove={draw}
+                                    onMouseUp={stopDraw}
+                                    onMouseLeave={stopDraw}
+                                    onTouchStart={startDraw}
+                                    onTouchMove={draw}
+                                    onTouchEnd={stopDraw}
+                                />
+                                <p className="text-[10px] text-slate-400 text-center mt-1">Dibuja la firma con el dedo o el ratón</p>
+                            </div>
+                            <div className="flex gap-2 px-4 pb-4">
+                                <button
+                                    onClick={clearCanvas}
+                                    className="flex-1 py-2 text-sm border border-slate-300 text-slate-600 rounded-lg hover:bg-slate-50"
+                                >
+                                    Borrar
+                                </button>
+                                <button
+                                    onClick={saveFirma}
+                                    disabled={savingFirma}
+                                    className="flex-1 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                                >
+                                    {savingFirma ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                                    Guardar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         )
     }
@@ -530,9 +672,10 @@ interface LineaCardProps {
     linea: LineaHoja
     updating: boolean
     onUpdate: (changes: Partial<{ servido: boolean; pagado: boolean; importe_cobrado: number }>) => void
+    onFirma: () => void
 }
 
-function LineaCard({ linea, updating, onUpdate }: LineaCardProps) {
+function LineaCard({ linea, updating, onUpdate, onFirma }: LineaCardProps) {
     const [showImporte, setShowImporte] = useState(linea.pagado)
     const [importeLocal, setImporteLocal] = useState(
         linea.importe_cobrado > 0 ? String(linea.importe_cobrado) : String(linea.total)
@@ -630,6 +773,22 @@ function LineaCard({ linea, updating, onUpdate }: LineaCardProps) {
                         <CreditCard className="w-4 h-4" />
                     )}
                     Cobrado
+                </button>
+
+                {/* Firma */}
+                <button
+                    onClick={onFirma}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all border ${
+                        linea.firma_guardada
+                            ? 'bg-purple-600 border-purple-600 text-white'
+                            : 'bg-white border-slate-300 text-slate-600 hover:border-purple-400 hover:text-purple-600'
+                    }`}
+                >
+                    {linea.firma_guardada ? (
+                        <Check className="w-4 h-4" />
+                    ) : (
+                        <PenLine className="w-4 h-4" />
+                    )}
                 </button>
             </div>
 

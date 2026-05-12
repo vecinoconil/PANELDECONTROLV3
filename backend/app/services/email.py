@@ -23,6 +23,39 @@ def _send(to: str, subject: str, html: str) -> None:
         smtp.send_message(msg)
 
 
+def send_with_empresa_smtp(
+    to: str,
+    subject: str,
+    html: str,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_user: str,
+    smtp_password: str,
+    from_name: str | None = None,
+) -> None:
+    """Envía un email usando la config SMTP de la empresa local (SQLite).
+    Soporta SSL (puerto 465) y STARTTLS (puerto 587 u otros)."""
+    from_addr = f"{from_name} <{smtp_user}>" if from_name else smtp_user
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to
+    msg.attach(MIMEText(html, "html"))
+
+    ctx = ssl.create_default_context()
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx) as smtp:
+            smtp.login(smtp_user, smtp_password)
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(smtp_host, smtp_port) as smtp:
+            smtp.ehlo()
+            smtp.starttls(context=ctx)
+            smtp.ehlo()
+            smtp.login(smtp_user, smtp_password)
+            smtp.send_message(msg)
+
+
 def send_credentials(to: str, nombre: str, password: str) -> None:
     subject = "Tus credenciales de acceso - SOLBA Panel V3"
     html = f"""\

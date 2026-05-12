@@ -201,27 +201,25 @@ def cuadro_mandos(
         """, params)
         series_iva = [dict(r) for r in cur.fetchall()]
 
-        # 7. Vencimientos pendientes (situacion=0), filtrados por fecha/series/agente
+        # 7. Vencimientos pendientes (situacion=0), filtrados por fecha de vencimiento
         # tipo=0: venta (clientes → pte cobro)
         cur.execute(f"""
             SELECT COALESCE(SUM(v.importe), 0) AS total_pte
             FROM vencimientos v
             JOIN ventas_cabeceras vc ON v.idcab = vc.id
             WHERE v.tipo = 0 AND v.situacion = 0
-              AND vc.fecha >= %(fecha_desde)s AND vc.fecha < %(fecha_hasta)s
+              AND EXTRACT(YEAR FROM v.fecha) = %(anio)s
               {serie_filter} {agente_filter}
         """, params)
         pte_cobro = float(cur.fetchone()["total_pte"])
 
-        # tipo=1: compra (proveedores → pte pago) — siempre año completo, solo facturas (tipodoc=8)
+        # tipo=1: compra (proveedores → pte pago) — filtrado por fecha de vencimiento, año completo
         cur.execute("""
             SELECT COALESCE(SUM(v.importe), 0) AS total_pte
             FROM vencimientos v
-            JOIN compras_cabeceras cc ON v.idcab = cc.id
             WHERE v.tipo = 1 AND v.situacion = 0
-              AND cc.tipodoc = 8
-              AND cc.fecha >= %(anio_desde)s AND cc.fecha < %(anio_hasta)s
-        """, {**params, "anio_desde": f"{anio}-01-01", "anio_hasta": f"{anio + 1}-01-01"})
+              AND EXTRACT(YEAR FROM v.fecha) = %(anio)s
+        """, params)
         pte_pago = float(cur.fetchone()["total_pte"])
 
         vencimientos = {"clientes": pte_cobro, "proveedores": pte_pago}
@@ -776,6 +774,7 @@ def vencimientos_detalle(
 
         anio_cond_vc = ""
         anio_cond_cc = ""
+        vto_fecha_cond = ""
         serie_cond_vc = ""
         params: dict = {}
         if anio is not None:
@@ -783,17 +782,25 @@ def vencimientos_detalle(
             anio_cond_cc = " AND cc.fecha >= %(cab_desde)s AND cc.fecha < %(cab_hasta)s"
             params["cab_desde"] = f"{anio}-01-01"
             params["cab_hasta"] = f"{anio + 1}-01-01"
-        elif fecha_desde:
-            anio_cond_vc = " AND vc.fecha >= %(vto_desde)s"
-            anio_cond_cc = " AND cc.fecha >= %(vto_desde)s"
-            params["vto_desde"] = fecha_desde
-        if fecha_hasta and anio is None:
-            anio_cond_vc += " AND vc.fecha <= %(vto_hasta)s"
-            anio_cond_cc += " AND cc.fecha <= %(vto_hasta)s"
-            params["vto_hasta"] = fecha_hasta
+        else:
+            # Filtrar por fecha de vencimiento cuando no se pasa anio
+            partes = []
+            if fecha_desde:
+                partes.append("v.fecha >= %(vto_desde)s")
+                params["vto_desde"] = fecha_desde
+            if fecha_hasta:
+                partes.append("v.fecha <= %(vto_hasta)s")
+                params["vto_hasta"] = fecha_hasta
+            if partes:
+                vto_fecha_cond = " AND " + " AND ".join(partes)
         if series and len(series) > 0:
             serie_cond_vc = " AND vc.serie = ANY(%(series)s)"
             params["series"] = series
+
+        # EXISTS para filtrar por fecha de vencimiento
+        vto_subquery_cond = vto_fecha_cond.replace(" v.fecha", " v2.fecha") if vto_fecha_cond else ""
+        vto_exists_0 = f"AND EXISTS (SELECT 1 FROM vencimientos v WHERE v.idcab = vc.id AND v.tipo = 0 {'AND v.situacion = 0' if solo_pendientes else ''}{vto_fecha_cond})" if vto_fecha_cond else ""
+        vto_exists_1 = f"AND EXISTS (SELECT 1 FROM vencimientos v WHERE v.idcab = cc.id AND v.tipo = 1 {'AND v.situacion = 0' if solo_pendientes else ''}{vto_fecha_cond})" if vto_fecha_cond else ""
 
         if tipo == 0:
             cur.execute(f"""
@@ -803,11 +810,12 @@ def vencimientos_detalle(
                        COALESCE((
                            SELECT SUM(v2.importe) FROM vencimientos v2
                            WHERE v2.idcab = vc.id AND v2.tipo = 0 AND v2.situacion = 0
+                           {vto_subquery_cond}
                        ), 0) AS pendiente
                 FROM ventas_cabeceras vc
                 WHERE vc.tipodoc = 8
-                  {serie_cond_vc} {anio_cond_vc}
-                {"AND COALESCE((SELECT SUM(v2.importe) FROM vencimientos v2 WHERE v2.idcab = vc.id AND v2.tipo=0 AND v2.situacion=0),0) > 0" if solo_pendientes else ""}
+                  {serie_cond_vc} {anio_cond_vc} {vto_exists_0}
+                {'' if vto_fecha_cond else ("AND COALESCE((SELECT SUM(v2.importe) FROM vencimientos v2 WHERE v2.idcab = vc.id AND v2.tipo=0 AND v2.situacion=0),0) > 0" if solo_pendientes else "")}
                 ORDER BY vc.fecha DESC, vc.cli_nombre
             """, params)
         else:
@@ -818,11 +826,12 @@ def vencimientos_detalle(
                        COALESCE((
                            SELECT SUM(v2.importe) FROM vencimientos v2
                            WHERE v2.idcab = cc.id AND v2.tipo = 1 AND v2.situacion = 0
+                           {vto_subquery_cond}
                        ), 0) AS pendiente
                 FROM compras_cabeceras cc
                 WHERE cc.tipodoc = 8
-                  {anio_cond_cc}
-                {"AND COALESCE((SELECT SUM(v2.importe) FROM vencimientos v2 WHERE v2.idcab = cc.id AND v2.tipo=1 AND v2.situacion=0),0) <> 0" if solo_pendientes else ""}
+                  {anio_cond_cc} {vto_exists_1}
+                {'' if vto_fecha_cond else ("AND COALESCE((SELECT SUM(v2.importe) FROM vencimientos v2 WHERE v2.idcab = cc.id AND v2.tipo=1 AND v2.situacion=0),0) <> 0" if solo_pendientes else "")}
                 ORDER BY cc.fecha DESC, cc.pro_nombre
             """, params)
 
@@ -1942,6 +1951,30 @@ def ficha_agente(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error ficha-agente: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.get('/buscar-clientes')
+def buscar_clientes(
+    q: str = Query(..., min_length=2),
+    empresa: Empresa = Depends(get_empresa_from_local),
+    current_user: Usuario = Depends(get_current_user),
+):
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT codigo, nombre FROM clientes WHERE nombre ILIKE %(q)s ORDER BY nombre LIMIT 20',
+            {'q': f'%{q}%'},
+        )
+        rows = cur.fetchall()
+        cur.close()
+        return [{'codigo': r['codigo'], 'nombre': r['nombre']} for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Error buscando clientes: {str(e)}')
     finally:
         if conn:
             conn.close()

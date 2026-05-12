@@ -1,6 +1,7 @@
 export interface LocalInfo {
     id: number
     nombre: string
+    asistente_ia: boolean
 }
 
 export interface UserMe {
@@ -19,6 +20,8 @@ export interface UserMe {
     tipodocs_autoventa: number[]
     caja_autoventa: number | null
     caja_reparto: number | null
+    precargar_historial_autoventa: boolean
+    paper_width_impresora: 80 | 100
     serie_expediciones: string[]
 }
 

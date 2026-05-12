@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { useAuth } from '../../auth/AuthContext'
-import { MapPin, Plus, Pencil, Trash2, Power, CheckCircle } from 'lucide-react'
+import { useRef } from 'react'
+import { MapPin, Plus, Pencil, Trash2, Power, CheckCircle, Bot, Globe, FileText, Upload, X as XIcon } from 'lucide-react'
 
 interface Empresa { id: number; nombre: string }
 interface Local {
@@ -12,18 +13,37 @@ interface Local {
     tipo: string
     fecha_alta: string | null
     fecha_definitiva: string | null
+    asistente_ia: boolean
+    smtp_host: string | null
+    smtp_port: number
+    smtp_user: string | null
+    smtp_from_name: string | null
+    formato_doc: string
+    portal_activo: boolean
+    frx_factura: string | null
 }
-interface LocalForm { empresa_id: number; nombre: string; tipo: string }
+interface LocalForm {
+    empresa_id: number
+    nombre: string
+    tipo: string
+    smtp_host: string
+    smtp_port: number
+    smtp_user: string
+    smtp_password: string
+    smtp_from_name: string
+    formato_doc: string
+}
 
 export default function Locales() {
-    const { user } = useAuth()
+    const { user, refreshUser } = useAuth()
     const isSuperadmin = (user as any)?.rol === 'superadmin'
+    const isGerente = (user as any)?.rol === 'gerente'
     const [locales, setLocales] = useState<Local[]>([])
     const [empresas, setEmpresas] = useState<Empresa[]>([])
     const [loading, setLoading] = useState(true)
     const [showModal, setShowModal] = useState(false)
     const [editId, setEditId] = useState<number | null>(null)
-    const [form, setForm] = useState<LocalForm>({ empresa_id: 0, nombre: '', tipo: 'prueba' })
+    const [form, setForm] = useState<LocalForm>({ empresa_id: 0, nombre: '', tipo: 'prueba', smtp_host: '', smtp_port: 465, smtp_user: '', smtp_password: '', smtp_from_name: '', formato_doc: 'a4_basico_logo_izq' })
     const [filterEmpresa, setFilterEmpresa] = useState<number | 0>(0)
     const [error, setError] = useState('')
 
@@ -52,16 +72,18 @@ export default function Locales() {
         return diff
     }
 
-    const openNew = () => { setEditId(null); setForm({ empresa_id: empresas[0]?.id || 0, nombre: '', tipo: 'prueba' }); setShowModal(true); setError('') }
-    const openEdit = (l: Local) => { setEditId(l.id); setForm({ empresa_id: l.empresa_id, nombre: l.nombre, tipo: l.tipo }); setShowModal(true); setError('') }
+    const openNew = () => { setEditId(null); setForm({ empresa_id: empresas[0]?.id || 0, nombre: '', tipo: 'prueba', smtp_host: '', smtp_port: 465, smtp_user: '', smtp_password: '', smtp_from_name: '', formato_doc: 'a4_basico_logo_izq' }); setShowModal(true); setError('') }
+    const openEdit = (l: Local) => { setEditId(l.id); setForm({ empresa_id: l.empresa_id, nombre: l.nombre, tipo: l.tipo, smtp_host: l.smtp_host || '', smtp_port: l.smtp_port || 465, smtp_user: l.smtp_user || '', smtp_password: '', smtp_from_name: l.smtp_from_name || '', formato_doc: l.formato_doc || 'a4_basico_logo_izq' }); setShowModal(true); setError('') }
 
     const save = async () => {
         setError('')
         try {
+            const payload: Record<string, unknown> = { ...form }
+            if (!payload.smtp_password) delete payload.smtp_password
             if (editId) {
-                await api.put(`/api/admin/locales/${editId}`, { nombre: form.nombre, empresa_id: form.empresa_id, tipo: form.tipo })
+                await api.put(`/api/admin/locales/${editId}`, payload)
             } else {
-                await api.post('/api/admin/locales', form)
+                await api.post('/api/admin/locales', payload)
             }
             setShowModal(false)
             fetchData()
@@ -75,6 +97,37 @@ export default function Locales() {
     }
 
     const toggle = async (id: number) => { await api.patch(`/api/admin/locales/${id}/toggle`); fetchData() }
+    const toggleAsistente = async (id: number) => {
+        await api.patch(`/api/admin/locales/${id}/toggle-asistente`)
+        fetchData()
+        await refreshUser()
+    }
+    const togglePortal = async (id: number) => {
+        await api.patch(`/api/admin/locales/${id}/toggle-portal`)
+        fetchData()
+    }
+
+    // FRX upload
+    const frxInputRef = useRef<HTMLInputElement>(null)
+    const [frxUploadId, setFrxUploadId] = useState<number | null>(null)
+    const [frxUploading, setFrxUploading] = useState(false)
+
+    const uploadFrx = async (id: number, file: File) => {
+        setFrxUploading(true)
+        try {
+            const fd = new FormData()
+            fd.append('file', file)
+            await api.post(`/api/admin/locales/${id}/frx`, fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+            fetchData()
+        } catch (e: any) { alert(e.response?.data?.detail || 'Error subiendo FRX') }
+        finally { setFrxUploading(false); setFrxUploadId(null) }
+    }
+
+    const deleteFrx = async (id: number) => {
+        if (!confirm('¿Eliminar la plantilla FRX de este local? Se usará la predeterminada.')) return
+        try { await api.delete(`/api/admin/locales/${id}/frx`); fetchData() }
+        catch (e: any) { alert(e.response?.data?.detail || 'Error') }
+    }
     const remove = async (id: number) => {
         if (!confirm('¿Eliminar este local?')) return
         try { await api.delete(`/api/admin/locales/${id}`); fetchData() }
@@ -112,6 +165,9 @@ export default function Locales() {
                                 <th className="py-2.5 px-3">Licencia</th>
                                 <th className="py-2.5 px-3">F. Alta</th>
                                 <th className="py-2.5 px-3">Estado</th>
+                                <th className="py-2.5 px-3 text-center">Asistente IA</th>
+                                {(isSuperadmin || isGerente) && <th className="py-2.5 px-3 text-center">Portal</th>}
+                                {(isSuperadmin || isGerente) && <th className="py-2.5 px-3 text-center">Plantilla FRX</th>}
                                 <th className="py-2.5 px-3 text-right">Acciones</th>
                             </tr>
                         </thead>
@@ -140,6 +196,65 @@ export default function Locales() {
                                             {l.activo ? 'Activo' : 'Inactivo'}
                                         </span>
                                     </td>
+                                    <td className="py-2 px-3 text-center">
+                                        <button
+                                            onClick={() => toggleAsistente(l.id)}
+                                            title={l.asistente_ia ? 'Desactivar Asistente IA' : 'Activar Asistente IA'}
+                                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                                                l.asistente_ia
+                                                    ? 'bg-violet-100 text-violet-700 hover:bg-violet-200'
+                                                    : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                                            }`}
+                                        >
+                                            <Bot className="w-3 h-3" />
+                                            {l.asistente_ia ? 'Activo' : 'Inactivo'}
+                                        </button>
+                                    </td>
+                                    {(isSuperadmin || isGerente) && (
+                                    <td className="py-2 px-3 text-center">
+                                        <button
+                                            onClick={() => togglePortal(l.id)}
+                                            title={l.portal_activo ? 'Desactivar Portal de Clientes' : 'Activar Portal de Clientes'}
+                                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                                                l.portal_activo
+                                                    ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                                                    : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                                            }`}
+                                        >
+                                            <Globe className="w-3 h-3" />
+                                            {l.portal_activo ? 'Activo' : 'Inactivo'}
+                                        </button>
+                                    </td>
+                                    )}
+                                    {(isSuperadmin || isGerente) && (
+                                    <td className="py-2 px-3 text-center">
+                                        <input
+                                            ref={frxUploadId === l.id ? frxInputRef : undefined}
+                                            type="file" accept=".frx" className="hidden"
+                                            onChange={e => { const f = e.target.files?.[0]; if (f) uploadFrx(l.id, f); e.target.value = '' }}
+                                        />
+                                        <div className="flex items-center justify-center gap-1">
+                                            {l.frx_factura ? (
+                                                <>
+                                                    <span className="text-xs text-green-700 flex items-center gap-0.5" title={l.frx_factura}>
+                                                        <FileText className="w-3 h-3" /> Personalizada
+                                                    </span>
+                                                    <button onClick={() => deleteFrx(l.id)} title="Eliminar plantilla" className="p-0.5 hover:text-red-500"><XIcon className="w-3 h-3" /></button>
+                                                </>
+                                            ) : (
+                                                <span className="text-xs text-slate-400">Por defecto</span>
+                                            )}
+                                            <button
+                                                onClick={() => { setFrxUploadId(l.id); setTimeout(() => frxInputRef.current?.click(), 50) }}
+                                                title="Subir plantilla .frx"
+                                                disabled={frxUploading}
+                                                className="p-0.5 hover:text-blue-600"
+                                            >
+                                                <Upload className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                    )}
                                     <td className="py-2 px-3 text-right">
                                         <div className="flex items-center justify-end gap-1">
                                             {isSuperadmin && l.tipo === 'prueba' && (
@@ -156,7 +271,7 @@ export default function Locales() {
                                 )
                             })}
                             {filtered.length === 0 && (
-                                <tr><td colSpan={7} className="py-8 text-center text-slate-400">No hay locales</td></tr>
+                                <tr><td colSpan={8} className="py-8 text-center text-slate-400">No hay locales</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -186,6 +301,48 @@ export default function Locales() {
                                 </select>
                             </div>
                         </div>
+
+                        {/* Sección SMTP */}
+                        <hr className="border-slate-200 mt-4" />
+                        <div className="mt-3">
+                            <p className="text-xs text-slate-500 font-medium mb-2">Configuración de email (SMTP)</p>
+                            <div className="space-y-3">
+                                <div className="grid grid-cols-3 gap-3">
+                                    <div className="col-span-2">
+                                        <label className="block text-xs text-slate-500 mb-1">Servidor SMTP</label>
+                                        <input className="input" value={form.smtp_host} onChange={e => setForm({ ...form, smtp_host: e.target.value })} placeholder="smtp.ionos.es" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-500 mb-1">Puerto</label>
+                                        <input className="input" type="number" value={form.smtp_port} onChange={e => setForm({ ...form, smtp_port: +e.target.value })} />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-xs text-slate-500 mb-1">Usuario (from)</label>
+                                        <input className="input" value={form.smtp_user} onChange={e => setForm({ ...form, smtp_user: e.target.value })} placeholder="correo@empresa.com" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-500 mb-1">Nombre remitente</label>
+                                        <input className="input" value={form.smtp_from_name} onChange={e => setForm({ ...form, smtp_from_name: e.target.value })} placeholder="Mi Empresa" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">Contraseña SMTP {editId && '(dejar vacío para no cambiar)'}</label>
+                                    <input className="input" type="password" value={form.smtp_password} onChange={e => setForm({ ...form, smtp_password: e.target.value })} />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Formato de documentos */}
+                        <hr className="border-slate-200 mt-4" />
+                        <div className="mt-3">
+                            <p className="text-xs text-slate-500 font-medium mb-2">Formato de documentos para email</p>
+                            <select className="input" value={form.formato_doc} onChange={e => setForm({ ...form, formato_doc: e.target.value })}>
+                                <option value="a4_basico_logo_izq">A4 básico logo izquierda</option>
+                            </select>
+                        </div>
+
                         {error && <p className="text-red-600 text-sm mt-3">{error}</p>}
                         <div className="flex justify-end gap-2 mt-5">
                             <button onClick={() => setShowModal(false)} className="btn-ghost">Cancelar</button>

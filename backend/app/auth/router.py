@@ -108,5 +108,8 @@ def me(current_user: Usuario = Depends(get_current_user), session: Session = Dep
         tipodocs_autoventa=current_user.tipodocs_autoventa or '[]',
         caja_autoventa=current_user.caja_autoventa,
         almacen_autoventa=current_user.almacen_autoventa,
+        caja_reparto=current_user.caja_reparto,
+        precargar_historial_autoventa=current_user.precargar_historial_autoventa,
+        paper_width_impresora=current_user.paper_width_impresora or 80,
         serie_expediciones=current_user.serie_expediciones or '[]',
     )

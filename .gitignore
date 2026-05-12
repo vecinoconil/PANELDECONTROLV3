@@ -3,9 +3,10 @@
 .env.local
 .env.production
 
-# Python
-__pycache__/
-*.py[cod]
+# Watchdog config (contiene tokens y email)
+backend/watchdog/watchdog_config.py
+backend/watchdog/watchdog.log
+backend/watchdog/watchdog.log.old
 *.pyc
 .venv/
 venv/
