@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace 'com.solba.panel'
-    compileSdk 35
+    compileSdk 34
 
     defaultConfig {
         applicationId "com.solba.panel"
-        minSdk 21          // Android 5.0 Lollipop en adelante (cubre >99% dispositivos)
-        targetSdk 35
+        minSdk 21
+        targetSdk 34
         versionCode 1
         versionName "1.0"
     }

@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - 'android-app/**'
-  workflow_dispatch:   # permite lanzarlo manualmente desde GitHub Actions
+  workflow_dispatch:
 
 jobs:
   build:
@@ -26,40 +26,35 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Accept Android SDK licenses & install SDK 35
-        run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
-            "platforms;android-35" \
-            "build-tools;35.0.1" \
-            "platform-tools"
-
-      - name: Install Gradle 8.9
-        run: |
-          wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip -O /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /opt/gradle
-          chmod +x /opt/gradle/gradle-8.9/bin/gradle
-          /opt/gradle/gradle-8.9/bin/gradle --version
-
-      - name: Create local.properties
-        working-directory: android-app
-        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Accept SDK licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 
       - name: Build Debug APK
         working-directory: android-app
-        run: /opt/gradle/gradle-8.9/bin/gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          # Descargar Gradle 8.6 e instalarlo
+          wget -q https://services.gradle.org/distributions/gradle-8.6-bin.zip -O /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /opt/gradle
+          export PATH="/opt/gradle/gradle-8.6/bin:$PATH"
+          gradle --version
+
+          # local.properties con ruta del SDK
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+          # Compilar APK — misma sesión bash, PATH activo
+          gradle assembleDebug --no-daemon --stacktrace
 
       - name: Copy APK to backend/downloads
         run: |
           mkdir -p backend/downloads
           cp android-app/app/build/outputs/apk/debug/app-debug.apk \
              backend/downloads/solba-panel.apk
-          echo "APK size: $(du -sh backend/downloads/solba-panel.apk)"
+          echo "APK: $(du -sh backend/downloads/solba-panel.apk)"
 
       - name: Commit APK to repo
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add backend/downloads/solba-panel.apk
-          git diff --staged --quiet && echo "No changes" || \
+          git diff --staged --quiet && echo "Sin cambios" || \
             (git commit -m "chore: actualizar solba-panel.apk [skip ci]" && git push)
