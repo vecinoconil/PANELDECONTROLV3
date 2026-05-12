@@ -41,8 +41,20 @@ jobs:
           # local.properties con ruta del SDK
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-          # Compilar APK — misma sesión bash, PATH activo
-          gradle assembleDebug --no-daemon --stacktrace
+          # Compilar APK — capturar output para diagnóstico
+          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build.log
+          GRADLE_EXIT=${PIPESTATUS[0]}
+
+          if [ $GRADLE_EXIT -ne 0 ]; then
+            echo "##[group]Error de compilación (últimas 100 líneas)"
+            tail -100 /tmp/build.log
+            echo "##[endgroup]"
+            # Emitir como annotations visibles en el check-run
+            grep -E "error:|Error|FAILED|Exception" /tmp/build.log | tail -30 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit 1
+          fi
 
       - name: Copy APK to backend/downloads
         run: |
