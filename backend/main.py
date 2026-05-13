@@ -96,7 +96,17 @@ def health():
 # ── Descargas (APK Android, etc.) ─────────────────────────────────────────────
 _DOWNLOADS = os.path.abspath(os.path.join(os.path.dirname(__file__), "downloads"))
 os.makedirs(_DOWNLOADS, exist_ok=True)
-app.mount("/downloads", StaticFiles(directory=_DOWNLOADS), name="downloads")
+
+from fastapi.responses import FileResponse
+
+@app.get("/downloads/solba-panel.apk", include_in_schema=False)
+async def download_apk():
+    apk_path = os.path.join(_DOWNLOADS, "solba-panel.apk")
+    return FileResponse(
+        apk_path,
+        media_type="application/vnd.android.package-archive",
+        filename="solba-panel.apk",
+    )
 
 # ── Serve compiled React frontend (SPA fallback) ──────────────────────────────
 _DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
