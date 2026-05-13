@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import { api } from '../api/client'
 import type { UserMe, LocalInfo } from '../types'
+import { startPrintJobPolling } from '../utils/thermalPrinter'
 
 interface AuthState {
     user: UserMe | null
@@ -37,7 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const token = sessionStorage.getItem('access_token')
         if (token) {
             api.get<UserMe>('/api/auth/me')
-                .then(({ data }) => setUser(data))
+                .then(({ data }) => { setUser(data); startPrintJobPolling() })
                 .catch(() => {
                     sessionStorage.removeItem('access_token')
                     sessionStorage.removeItem('refresh_token')
@@ -79,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionStorage.setItem('refresh_token', data.refresh_token)
         const me = await api.get<UserMe>('/api/auth/me')
         setUser(me.data)
+        startPrintJobPolling()
     }
 
     function logout() {

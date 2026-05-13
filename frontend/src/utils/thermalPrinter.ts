@@ -6,6 +6,8 @@
  * Bluetooth Classic emparejadas (Bixolon SPP-R410, etc.).
  */
 
+import { api } from '../api/client'
+
 // ─── Config en localStorage ──────────────────────────────────────────────────
 const STORAGE_KEY = 'autoventa_printer_cfg'
 
@@ -936,56 +938,66 @@ async function _sendViaNativePrinter(bytes: Uint8Array): Promise<boolean> {
   return sent
 }
 
+// ─── Cola de impresión en servidor ───────────────────────────────────────────
+/** Envía los bytes ESC/POS al servidor para que los recoja la APK en background. */
+async function postPrintJob(bytes: Uint8Array): Promise<void> {
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+  const b64 = btoa(binary)
+  await api.post('/api/print-jobs', { payload_b64: b64 })
+  showToast('🖨️ Ticket enviado a la cola de impresión', 2500)
+}
+
 // ─── Envío de bytes a la impresora ───────────────────────────────────────────
 function sendToRawBt(bytes: Uint8Array): void {
   if (hasAndroidBridge()) {
-    // Estamos dentro de la APK nativa → Bluetooth SPP directo
-    _sendViaNativePrinter(bytes) // async pero no necesitamos await aquí
+    // Estamos dentro de la APK nativa → cola + bridge polling
+    postPrintJob(bytes).catch(() => {
+      // Fallback directo si el servidor falla
+      _sendViaNativePrinter(bytes)
+    })
     return
   }
-  // Fallback: descarga PNG para abrir con app externa
-  showToast('📥 Instala la app Solba Panel para imprimir directamente', 5000)
+  // Fuera de la APK: encolar en servidor (la APK del agente lo recogerá)
+  postPrintJob(bytes).catch(() => {
+    showToast('❌ No se pudo enviar a la cola de impresión', 4000)
+  })
 }
 
-function _sendPngFallback(canvas: HTMLCanvasElement): void {
-  if (hasAndroidBridge()) {
-    // Dentro de APK: usar bridge en vez de descargar
-    canvas.toBlob(async blob => {
-      if (!blob) return
-      // Convertir blob a Uint8Array y enviar como ESC/POS raster
-      const buf = await blob.arrayBuffer()
-      sendToRawBt(new Uint8Array(buf))
-    }, 'image/png')
-    return
-  }
-  // Sin APK: descarga el PNG
-  canvas.toBlob(blob => {
-    if (!blob) { showToast('Error generando imagen del ticket'); return }
-    showToast('📥 Instala la app Solba Panel para imprimir directamente', 5000)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'ticket.png'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(url), 30_000)
-  }, 'image/png')
+function _sendPngFallback(_canvas: HTMLCanvasElement): void {
+  // Ya no se usa: la impresión siempre va por cola de servidor
 }
 
-function _sendPrnFallback(bytes: Uint8Array): void {
-  if (hasAndroidBridge()) {
-    _sendViaNativePrinter(bytes)
-    return
-  }
-  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = 'ticket.prn'
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(url), 30_000)
+function _sendPrnFallback(_bytes: Uint8Array): void {
+  // Ya no se usa: la impresión siempre va por cola de servidor
+}
+
+// ─── Polling de jobs de impresión (solo en APK) ───────────────────────────────
+let _pollIntervalId: ReturnType<typeof setInterval> | null = null
+
+/** Arranca el polling en background. Llamar tras login cuando hasAndroidBridge(). */
+export function startPrintJobPolling(): void {
+  if (!hasAndroidBridge()) return
+  if (_pollIntervalId !== null) return
+
+  _pollIntervalId = setInterval(async () => {
+    try {
+      const res = await api.get<{ id: number; payload_b64: string }[]>('/api/print-jobs/pending')
+      const jobs = res.data
+      for (const job of jobs) {
+        // Decodificar base64 → Uint8Array
+        const bin = atob(job.payload_b64)
+        const bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+
+        await _sendViaNativePrinter(bytes)
+
+        await api.post(`/api/print-jobs/${job.id}/done`).catch(() => {/* ignorar */})
+      }
+    } catch {
+      // Silenciar errores de red para no molestar al usuario
+    }
+  }, 5000)
 }
 
 // ─── Modal de previsualización ───────────────────────────────────────────────
@@ -1088,14 +1100,9 @@ export async function printTicket(
 
   if (isAndroid) {
     const canvas = await buildTicketCanvas(data, cfg, wide)
-    if (hasAndroidBridge()) {
-      // APK nativa: previsualizar y enviar ESC/POS directo por Bluetooth SPP
-      const bytes = canvasToEscPos(canvas)
-      await showPreviewModal(canvas, () => sendToRawBt(bytes))
-    } else {
-      // Navegador Chrome sin APK: previsualizar y ofrecer descarga + botón instalar APK
-      await showPreviewModal(canvas, () => _sendPngFallback(canvas))
-    }
+    // Siempre: previsualizar y encolar en servidor (la APK imprime automáticamente)
+    const bytes = canvasToEscPos(canvas)
+    await showPreviewModal(canvas, () => sendToRawBt(bytes))
     return
   }
 
