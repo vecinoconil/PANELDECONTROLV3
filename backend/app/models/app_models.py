@@ -101,3 +101,13 @@ class Visita(SQLModel, table=True):
     fecha: datetime = Field(default_factory=datetime.utcnow)
     motivo: str = Field(max_length=100)
     resultado: str = Field(default='', max_length=2000)
+
+
+class PrintJob(SQLModel, table=True):
+    __tablename__ = "print_jobs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(index=True)
+    payload_b64: str  # bytes ESC/POS codificados en base64
+    status: str = Field(default="pending")  # pending | done
+    created_at: datetime = Field(default_factory=datetime.utcnow)

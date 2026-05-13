@@ -23,6 +23,7 @@ from app.routers.reparto import router as reparto_router
 from app.routers.asistente import router as asistente_router
 from app.routers.portal import router as portal_router
 from app.routers.print_ticket import router as print_ticket_router
+from app.routers.print_jobs import router as print_jobs_router
 
 
 def _migrate_erp_databases():
@@ -86,6 +87,7 @@ app.include_router(reparto_router,        prefix="/api/almacen",       tags=["Re
 app.include_router(asistente_router,      prefix="/api/asistente",     tags=["Asistente"])
 app.include_router(portal_router,         prefix="/api/portal",        tags=["Portal"])
 app.include_router(print_ticket_router,   prefix="/api/print",         tags=["Print"])
+app.include_router(print_jobs_router)
 
 
 @app.get("/api/health", tags=["Health"])
