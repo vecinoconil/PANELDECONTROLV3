@@ -813,6 +813,13 @@ export default function Autoventa() {
     const typedUser = user as UserMe | null
     const canEditPrice = typedUser?.rol === 'superadmin' || typedUser?.rol === 'gerente' || typedUser?.autoventa_modifica_precio === true
 
+    // Helper: carga config impresora e inyecta el nombre de empresa automáticamente
+    const getPrintCfg = () => {
+        const cfg = loadPrinterConfig()
+        if (!cfg.emp_nombre && user?.empresa_nombre) cfg.emp_nombre = user.empresa_nombre
+        return cfg
+    }
+
     // Step state
     const [tipodoc, setTipodoc] = useState<TipoDoc | null>(null)
     const serie = typedUser?.serie_autoventa ?? ''
@@ -897,7 +904,7 @@ export default function Autoventa() {
         try {
             const r = await api.get<DetalleDoc>(`/api/autoventa/clientes/${cliCodigo}/documentos/${doc.id}/lineas`)
             const d = r.data
-            const cfg = loadPrinterConfig()
+            const cfg = getPrintCfg()
             await printTicket(
                 {
                     tipodoc_label: doc.tipodoc_label,
@@ -2150,7 +2157,7 @@ export default function Autoventa() {
     // ── Imprimir ticket térmico ──────────────────────────────────────────────
     const handlePrint = async () => {
         if (!resultado || !clienteSeleccionado) return
-        const cfg = loadPrinterConfig()
+        const cfg = getPrintCfg()
         setPrinting(true)
         setPrintError('')
         setPrintOk(false)
@@ -2209,7 +2216,7 @@ export default function Autoventa() {
             unidad?: string
         }>
     }) => {
-        const cfg = loadPrinterConfig()
+        const cfg = getPrintCfg()
         setDetallePrinting(true)
         setDetallePrintError('')
         setDetallePrintOk(false)

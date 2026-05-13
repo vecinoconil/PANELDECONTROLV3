@@ -240,11 +240,11 @@ async function buildTicketCanvas(
   const SZ_SMALL = wide ? 32   : 28
   const SZ_TOTAL = wide ? 64   : 52
 
-  // Anchos de columna para líneas de artículo
-  const C_U = wide ? 130 : 90            // Uds
-  const C_P = wide ? 160 : 110           // Precio unit
-  const C_I = wide ? 160 : 110           // Importe
-  const C_D = IW - C_U - C_P - C_I      // Descripción
+  // Anchos de columna para líneas de artículo (orden: UDS | DESC | PRECIO | IMPORTE)
+  const C_U = wide ? 80  : 60            // Uds (izquierda)
+  const C_P = wide ? 130 : 100           // Precio unit
+  const C_I = wide ? 130 : 100           // Importe
+  const C_D = IW - C_U - C_P - C_I      // Descripción (centro)
 
   // ── Helpers de canvas ───────────────────────────────────────────────────
   function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
@@ -322,14 +322,15 @@ async function buildTicketCanvas(
   totalHeight += SZ_SMALL + 8
 
   // Líneas de artículo
-  setFont(mctx, SZ_BODY)
+  setFont(mctx, SZ_SMALL)
   for (const lin of data.lineas) {
     const uds = parseFloat(String(lin.unidades)) || 0
     if (uds === 0 && !lin.es_canon) continue
     let desc = lin.descripcion
     if (lin.talla || lin.color) desc += ` (${[lin.talla, lin.color].filter(Boolean).join('/')})`
     const lines = wrapText(mctx, desc, C_D - 4)
-    totalHeight += lines.length * (SZ_BODY + 4)
+    const shownLines = Math.min(lines.length, 2)
+    totalHeight += shownLines * (SZ_SMALL + 4)
     if (lin.dto > 0) totalHeight += SZ_SMALL + 3
     if (lin.tipo_unidad === 1 && lin.gramos) totalHeight += SZ_SMALL + 3
   }
@@ -464,12 +465,12 @@ async function buildTicketCanvas(
   ctx.stroke()
   y += 10
 
-  // Header columnas
+  // Header columnas: UDS | DESCRIPCIÓN | PRECIO | IMPORTE
   setFont(ctx, SZ_SMALL, true)
-  ctx.fillText('DESCRIPCIÓN', MARGIN, y + SZ_SMALL)
-  drawRight(ctx, 'UDS',    MARGIN + C_D + C_U,        y + SZ_SMALL)
-  drawRight(ctx, 'PRECIO', MARGIN + C_D + C_U + C_P,  y + SZ_SMALL)
-  drawRight(ctx, 'IMPORTE',MARGIN + IW,                y + SZ_SMALL)
+  drawRight(ctx, 'UDS',     MARGIN + C_U,              y + SZ_SMALL)
+  ctx.fillText('DESCRIPCIÓN', MARGIN + C_U + 4,        y + SZ_SMALL)
+  drawRight(ctx, 'PRECIO',  MARGIN + C_U + C_D + C_P,  y + SZ_SMALL)
+  drawRight(ctx, 'IMPORTE', MARGIN + IW,               y + SZ_SMALL)
   y += SZ_SMALL + 4
   ctx.beginPath(); ctx.moveTo(MARGIN, y); ctx.lineTo(W - MARGIN, y)
   ctx.lineWidth = 0.5; ctx.stroke(); ctx.lineWidth = 1
@@ -482,32 +483,40 @@ async function buildTicketCanvas(
 
     const precioNeto = lin.precio * (1 - lin.dto / 100)
     const importe    = uds * precioNeto
-    const udsStr     = uds.toLocaleString('es-ES', { maximumFractionDigits: 3 })
+    const udsStr     = uds % 1 === 0 ? String(uds) : uds.toLocaleString('es-ES', { maximumFractionDigits: 3 })
 
     let desc = lin.descripcion
     if (lin.talla || lin.color) desc += ` (${[lin.talla, lin.color].filter(Boolean).join('/')})`
 
-    setFont(ctx, SZ_BODY)
+    setFont(ctx, SZ_SMALL)
     const descLines = wrapText(ctx, desc, C_D - 4)
-    for (let i = 0; i < descLines.length; i++) {
-      ctx.fillText(descLines[i], MARGIN, y + SZ_BODY)
-      if (i === 0) {
-        drawRight(ctx, udsStr,          MARGIN + C_D + C_U,        y + SZ_BODY)
-        drawRight(ctx, money(precioNeto),MARGIN + C_D + C_U + C_P, y + SZ_BODY)
-        drawRight(ctx, money(importe),  MARGIN + IW,               y + SZ_BODY)
+    const shownLines = Math.min(descLines.length, 2)
+    for (let i = 0; i < shownLines; i++) {
+      let lineText = descLines[i]
+      // truncar última línea si hay más
+      if (i === shownLines - 1 && descLines.length > shownLines) {
+        while (ctx.measureText(lineText + '…').width > C_D - 4 && lineText.length > 0)
+          lineText = lineText.slice(0, -1)
+        lineText += '…'
       }
-      y += SZ_BODY + 4
+      ctx.fillText(lineText, MARGIN + C_U + 4, y + SZ_SMALL)
+      if (i === 0) {
+        drawRight(ctx, udsStr,             MARGIN + C_U,              y + SZ_SMALL)
+        drawRight(ctx, money(precioNeto),  MARGIN + C_U + C_D + C_P,  y + SZ_SMALL)
+        drawRight(ctx, money(importe),     MARGIN + IW,               y + SZ_SMALL)
+      }
+      y += SZ_SMALL + 4
     }
 
     if (lin.dto > 0) {
       setFont(ctx, SZ_SMALL)
-      ctx.fillText(`  Dto: ${lin.dto}%`, MARGIN, y + SZ_SMALL)
+      drawRight(ctx, `Dto ${lin.dto}%`, MARGIN + C_U + C_D + C_P, y + SZ_SMALL)
       y += SZ_SMALL + 3
     }
     if (lin.tipo_unidad === 1 && lin.gramos) {
       setFont(ctx, SZ_SMALL)
       const gr = parseFloat(String(lin.gramos)).toLocaleString('es-ES', { maximumFractionDigits: 3 })
-      ctx.fillText(`  → ${gr} ${lin.unidad || 'kg'}`, MARGIN, y + SZ_SMALL)
+      ctx.fillText(`  → ${gr} ${lin.unidad || 'kg'}`, MARGIN + C_U + 4, y + SZ_SMALL)
       y += SZ_SMALL + 3
     }
   }
