@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../../api/client'
-import { Users, Plus, Pencil, Trash2, Power, Eye, EyeOff, Mail, Settings, Search } from 'lucide-react'
+import { Users, Plus, Pencil, Trash2, Power, Eye, EyeOff, Mail, Settings, Search, Image } from 'lucide-react'
 import { PERMISOS_DISPONIBLES, hasPermiso, type PermisosMap } from '../../types'
 import { useAuth } from '../../auth/AuthContext'
+import { loadPrinterConfig, savePrinterConfig } from '../../utils/thermalPrinter'
 
 interface Empresa { id: number; nombre: string }
 interface LocalItem { id: number; nombre: string; empresa_id: number }
@@ -34,6 +35,7 @@ interface Usuario {
     serie_expediciones: string[]
     caja_reparto: number | null
     paper_width_impresora: 80 | 100
+    ticket_design_autoventa: 1 | 2
 }
 interface UsuarioForm {
     empresa_id: number | null
@@ -55,6 +57,7 @@ interface UsuarioForm {
     serie_expediciones: string[]
     caja_reparto: number | null
     paper_width_impresora: 80 | 100
+    ticket_design_autoventa: 1 | 2
 }
 
 const ROLES = ['superadmin', 'gerente', 'encargado', 'usuario', 'distribuidor']
@@ -62,7 +65,7 @@ const emptyForm: UsuarioForm = {
     empresa_id: null, email: '', nombre: '', password: '', rol: 'usuario',
     local_ids: [], permisos: {},
     agente_autoventa: null, serie_autoventa: null, autoventa_modifica_precio: false, tipodocs_autoventa: [], caja_autoventa: null, almacen_autoventa: null, fpago_autoventa: null, solo_clientes_agente: false, precargar_historial_autoventa: true,
-    serie_expediciones: [], caja_reparto: null, paper_width_impresora: 80,
+    serie_expediciones: [], caja_reparto: null, paper_width_impresora: 80, ticket_design_autoventa: 1,
 }
 
 export default function Usuarios() {
@@ -87,6 +90,22 @@ export default function Usuarios() {
     const [configFromCheck, setConfigFromCheck] = useState(false)
     const [subError, setSubError] = useState('')
     const [busqueda, setBusqueda] = useState('')
+
+    // Logo para el ticket (se guarda en localStorage del device)
+    const [logoPreview, setLogoPreview] = useState<string>(() => loadPrinterConfig().emp_logo || '')
+    const logoInputRef = useRef<HTMLInputElement>(null)
+
+    const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = ev => {
+            const b64 = ev.target?.result as string
+            setLogoPreview(b64)
+            savePrinterConfig({ ...loadPrinterConfig(), emp_logo: b64 })
+        }
+        reader.readAsDataURL(file)
+    }
 
     const { user: currentUser } = useAuth()
 
@@ -174,6 +193,7 @@ export default function Usuarios() {
             serie_expediciones: u.serie_expediciones ?? [],
             caja_reparto: u.caja_reparto ?? null,
             paper_width_impresora: (u.paper_width_impresora === 100 ? 100 : 80) as 80 | 100,
+            ticket_design_autoventa: (u.ticket_design_autoventa === 2 ? 2 : 1) as 1 | 2,
         })
         setShowModal(true)
         setError('')
@@ -740,6 +760,62 @@ export default function Usuarios() {
                                                     </button>
                                                 ))}
                                             </div>
+                                        </div>
+                                        {/* Diseño del ticket */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-700 mb-1">Diseño del ticket</label>
+                                            <div className="flex gap-2">
+                                                {([1, 2] as const).map(d => (
+                                                    <button
+                                                        key={d}
+                                                        type="button"
+                                                        onClick={async () => {
+                                                            setForm(f => ({ ...f, ticket_design_autoventa: d }))
+                                                            if (editId) {
+                                                                try {
+                                                                    await api.put(`/api/admin/usuarios/${editId}`, { ticket_design_autoventa: d })
+                                                                    fetch()
+                                                                } catch (err: any) {
+                                                                    setSubError(err.response?.data?.detail || 'Error guardando')
+                                                                    setForm(f => ({ ...f, ticket_design_autoventa: d === 1 ? 2 : 1 }))
+                                                                }
+                                                            }
+                                                        }}
+                                                        className={`flex-1 py-1.5 text-xs font-medium rounded-lg border transition-all ${
+                                                            form.ticket_design_autoventa === d
+                                                                ? 'bg-brand text-white border-brand'
+                                                                : 'bg-white text-slate-500 border-slate-300 hover:border-slate-500'
+                                                        }`}
+                                                    >
+                                                        {d === 1 ? '1 — Clásico' : '2 — Moderno'}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        {/* Logo del ticket (se guarda en este dispositivo) */}
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-700 mb-1 flex items-center gap-1">
+                                                <Image className="w-3 h-3" /> Logo del ticket <span className="text-slate-400 font-normal">(este dispositivo)</span>
+                                            </label>
+                                            {logoPreview ? (
+                                                <div className="flex items-center gap-2">
+                                                    <img src={logoPreview} alt="Logo" className="h-10 object-contain border border-slate-200 rounded bg-white p-0.5" />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => { setLogoPreview(''); savePrinterConfig({ ...loadPrinterConfig(), emp_logo: '' }) }}
+                                                        className="text-xs text-red-600 hover:text-red-700"
+                                                    >Quitar</button>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => logoInputRef.current?.click()}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-brand hover:text-brand"
+                                                >
+                                                    <Image className="w-3.5 h-3.5" /> Subir logo (PNG/JPG)
+                                                </button>
+                                            )}
+                                            <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoChange} />
                                         </div>
                                         <div>
                                             <label className="block text-xs font-medium text-slate-700 mb-1">Caja de cobros (efectivo)</label>

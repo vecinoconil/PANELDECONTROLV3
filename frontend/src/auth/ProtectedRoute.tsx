@@ -1,6 +1,6 @@
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuth } from './AuthContext'
-import { hasPermiso } from '../types'
+import { hasPermiso, getFirstAllowedRoute } from '../types'
 
 interface ProtectedRouteProps {
     requiredPermission?: string
@@ -35,7 +35,7 @@ export default function ProtectedRoute({ requiredPermission, action = 'entrar' }
         } else {
             ok = hasPermiso(user.permisos, requiredPermission, action)
         }
-        if (!ok) return <Navigate to="/dashboard" replace />
+        if (!ok) return <Navigate to={getFirstAllowedRoute(user)} replace />
     }
 
     return <Outlet />

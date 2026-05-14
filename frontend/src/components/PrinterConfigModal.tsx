@@ -79,6 +79,11 @@ export default function PrinterConfigModal({ onClose, testData }: Props) {
       numero: 1,
       fecha: new Date().toISOString(),
       cli_nombre: 'CLIENTE PRUEBA S.L.',
+      cli_cif: 'B12345678',
+      cli_alias: 'PRUEBA CENTRAL',
+      cli_direccion: 'Calle Mayor 1',
+      cli_localidad: 'Madrid',
+      cli_cpostal: '28001',
       lineas: [
         { descripcion: 'Artículo de prueba', unidades: '2', precio: 12.50, dto: 0,  piva: 21 },
         { descripcion: 'Otro artículo',      unidades: '1', precio:  5.00, dto: 10, piva: 10 },

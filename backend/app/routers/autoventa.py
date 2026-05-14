@@ -32,6 +32,34 @@ def _require_autoventa(user: Usuario):
         raise HTTPException(status_code=403, detail="Sin permiso de Autoventa")
 
 
+# ── Empresa info (datos fiscales del ERP) ─────────────────────────────────
+
+@router.get("/empresa-info")
+def get_empresa_info(
+    empresa: Empresa = Depends(get_empresa_from_local),
+    current_user: Usuario = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _require_autoventa(current_user)
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT nombre, cif, direccion, localidad, cpostal, telefono1, email "
+            "FROM empresa LIMIT 1"
+        )
+        row = cur.fetchone()
+        if not row:
+            return {}
+        return dict(row)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error BD: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
 # ── Agentes ───────────────────────────────────────────────────────────────
 
 @router.get("/agentes")
@@ -126,6 +154,43 @@ def buscar_clientes(
             params,
         )
         return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error BD: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+
+# ── Ficha de un cliente ───────────────────────────────────────────────────
+
+@router.get("/clientes/{cli_codigo}")
+def get_cliente(
+    cli_codigo: int,
+    empresa: Empresa = Depends(get_empresa_from_local),
+    current_user: Usuario = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _require_autoventa(current_user)
+    conn = None
+    try:
+        conn = get_pg_connection(empresa)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT codigo, nombre, alias, cif,
+                   direccion, localidad, cpostal, provincia,
+                   fpago, tarifabase, COALESCE(email, '') AS email
+            FROM clientes
+            WHERE codigo = %(codigo)s
+            """,
+            {"codigo": cli_codigo},
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Cliente no encontrado")
+        return dict(row)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error BD: {e}")
     finally:
@@ -1147,22 +1212,51 @@ def get_documento_lineas(
         if not cab:
             raise HTTPException(status_code=404, detail="Documento no encontrado")
         cur.execute(
-            """SELECT referencia, descripcion, unidades, precio, pdto1 AS dto, importe, piva, talla, color
-               FROM ventas_lineas WHERE idcab = %s ORDER BY id""",
+            """SELECT vl.referencia, vl.descripcion, vl.unidades, vl.gramos,
+                      vl.tipo_unidad, ''::text AS unidad, vl.precio, vl.pdto1 AS dto,
+                      vl.importe, vl.piva, vl.talla, vl.color,
+                      vl.linea_cabecera,
+                      (
+                          SELECT STRING_AGG(ls.lote, ', ' ORDER BY ls.fecha_caducidad ASC NULLS LAST, ls.lote)
+                          FROM (
+                              SELECT DISTINCT al.lote, al.fecha_caducidad
+                              FROM articulos_lotes_registro alr
+                              JOIN articulos_lotes al ON al.id = alr.id_lote
+                              WHERE alr.id_lin = vl.id
+                          ) ls
+                      ) AS lote,
+                      (
+                          SELECT STRING_AGG(cs.cad, ', ' ORDER BY cs.cad)
+                          FROM (
+                              SELECT DISTINCT TO_CHAR(al.fecha_caducidad, 'DD/MM/YYYY') AS cad
+                              FROM articulos_lotes_registro alr
+                              JOIN articulos_lotes al ON al.id = alr.id_lote
+                              WHERE alr.id_lin = vl.id
+                                AND al.fecha_caducidad IS NOT NULL
+                          ) cs
+                      ) AS fecha_caducidad
+               FROM ventas_lineas vl WHERE idcab = %s ORDER BY id""",
             (idcab,),
         )
         lineas = []
         for r in cur.fetchall():
+            es_canon = int(r["linea_cabecera"] or 0) > 0 or not r.get("referencia")
             lineas.append({
                 "referencia": r["referencia"] or "",
                 "descripcion": r["descripcion"] or "",
                 "unidades": float(r["unidades"]),
+                "gramos": float(r["gramos"] or 0),
+                "tipo_unidad": int(r["tipo_unidad"] or 0),
+                "unidad": r["unidad"] or "",
                 "precio": float(r["precio"]),
                 "dto": float(r["dto"] or 0),
                 "importe": float(r["importe"]),
                 "piva": float(r["piva"] or 0),
                 "talla": r["talla"] or "",
                 "color": r["color"] or "",
+                "es_canon": es_canon,
+                "lote": r["lote"] or None,
+                "fecha_caducidad": r["fecha_caducidad"] or None,
             })
         return {
             "id": cab["id"],
@@ -1981,7 +2075,7 @@ def mis_documentos(
         conn = get_pg_connection(empresa)
         cur = conn.cursor()
         agente = current_user.agente_autoventa
-        agente_filter = "AND agente = %(ag)s" if agente else ""
+        agente_filter = "AND vc.agente = %(ag)s" if agente else ""
         params = {"td": tipodoc, "serie": serie_usuario, "ag": agente}
 
         if tipodoc == 4:
@@ -1989,11 +2083,13 @@ def mis_documentos(
             cur.execute(
                 f"""
                 SELECT vc.id, vc.serie, vc.numero, vc.fecha, vc.cli_codigo, vc.cli_nombre, vc.total,
-                       COALESCE(SUM(ve.importe), 0) AS cobrado
+                       COALESCE(SUM(ve.importe), 0) AS cobrado,
+                       c.alias AS cli_alias
                 FROM ventas_cabeceras vc
                 LEFT JOIN ventas_entregas ve ON ve.idcab = vc.id
+                LEFT JOIN clientes c ON c.codigo = vc.cli_codigo
                 WHERE vc.tipodoc = %(td)s AND vc.serie = %(serie)s {agente_filter}
-                GROUP BY vc.id, vc.serie, vc.numero, vc.fecha, vc.cli_codigo, vc.cli_nombre, vc.total
+                GROUP BY vc.id, vc.serie, vc.numero, vc.fecha, vc.cli_codigo, vc.cli_nombre, vc.total, c.alias
                 ORDER BY vc.fecha DESC, vc.numero DESC
                 LIMIT 60
                 """,
@@ -2008,6 +2104,7 @@ def mis_documentos(
                     "fecha": r["fecha"].isoformat() if r["fecha"] else None,
                     "cli_codigo": r["cli_codigo"],
                     "cli_nombre": r["cli_nombre"],
+                    "cli_alias": r["cli_alias"] or "",
                     "total": float(r["total"] or 0),
                     "pendiente": round(float(r["total"] or 0) - float(r["cobrado"] or 0), 2),
                     "finalizado": float(r["total"] or 0) - float(r["cobrado"] or 0) <= 0.01,
@@ -2017,10 +2114,12 @@ def mis_documentos(
         else:
             cur.execute(
                 f"""
-                SELECT id, serie, numero, fecha, cli_codigo, cli_nombre, total, fechafin
-                FROM ventas_cabeceras
-                WHERE tipodoc = %(td)s AND serie = %(serie)s {agente_filter}
-                ORDER BY fecha DESC, numero DESC
+                SELECT vc.id, vc.serie, vc.numero, vc.fecha, vc.cli_codigo, vc.cli_nombre, vc.total, vc.fechafin,
+                       c.alias AS cli_alias
+                FROM ventas_cabeceras vc
+                LEFT JOIN clientes c ON c.codigo = vc.cli_codigo
+                WHERE vc.tipodoc = %(td)s AND vc.serie = %(serie)s {agente_filter}
+                ORDER BY vc.fecha DESC, vc.numero DESC
                 LIMIT 60
                 """,
                 params,
@@ -2034,6 +2133,7 @@ def mis_documentos(
                     "fecha": r["fecha"].isoformat() if r["fecha"] else None,
                     "cli_codigo": r["cli_codigo"],
                     "cli_nombre": r["cli_nombre"],
+                    "cli_alias": r["cli_alias"] or "",
                     "total": float(r["total"] or 0),
                     "pendiente": float(r["total"] or 0),
                     "finalizado": r["fechafin"] is not None,
@@ -2073,6 +2173,39 @@ def detalle_documento(
             {"id": idcab},
         )
         lineas = cur.fetchall()
+
+        # Cargar lotes asignados a cada línea (una consulta plana, agregación en Python)
+        ids_linea = [int(l["id"]) for l in lineas if l.get("id")]
+        lotes_por_linea: dict[int, dict] = {}
+        if ids_linea:
+            cur.execute(
+                """
+                SELECT DISTINCT alr.id_lin, al.lote, al.fecha_caducidad
+                FROM articulos_lotes_registro alr
+                JOIN articulos_lotes al ON al.id = alr.id_lote
+                WHERE alr.id_lin = ANY(%(ids)s)
+                ORDER BY alr.id_lin, al.fecha_caducidad ASC NULLS LAST, al.lote
+                """,
+                {"ids": ids_linea},
+            )
+            from collections import defaultdict
+            _lotes_tmp: dict = defaultdict(list)
+            _cad_tmp:   dict = defaultdict(list)
+            for row in cur.fetchall():
+                id_lin = int(row["id_lin"])
+                lote = row["lote"] or ""
+                if lote and lote not in _lotes_tmp[id_lin]:
+                    _lotes_tmp[id_lin].append(lote)
+                if row["fecha_caducidad"]:
+                    cad_str = row["fecha_caducidad"].strftime("%d/%m/%Y")
+                    if cad_str not in _cad_tmp[id_lin]:
+                        _cad_tmp[id_lin].append(cad_str)
+            for id_lin in _lotes_tmp:
+                lotes_por_linea[id_lin] = {
+                    "lote": ", ".join(_lotes_tmp[id_lin]) or None,
+                    "fecha_caducidad": ", ".join(_cad_tmp[id_lin]) or None,
+                }
+
         # Cargar control_lotes y tallas_colores de los artículos
         refs = list({l["referencia"] for l in lineas if l.get("referencia")})
         flags_art: dict[str, dict] = {}
@@ -2124,12 +2257,16 @@ def detalle_documento(
                     "tipo_unidad": int(l.get("tipo_unidad", 0) or 0),
                     "unidad": l.get("unidad", "") or "",
                     "precio": float(l.get("precio", 0) or 0),
-                    "dto": float(l.get("dto", 0) or 0),
+                    "dto": float(l.get("pdto1", l.get("dto", 0)) or 0),
+                    "importe": float(l.get("importe", 0) or 0),
                     "piva": float(l.get("piva", 0) or 0),
                     "talla": l.get("talla", "") or "",
                     "color": l.get("color", "") or "",
                     "control_lotes": flags_art.get(l["referencia"], {}).get("control_lotes", False),
                     "tallas_colores": flags_art.get(l["referencia"], {}).get("tallas_colores", False),
+                    "es_canon": int(l.get("linea_cabecera") or 0) > 0 or not l.get("referencia"),
+                    "lote": lotes_por_linea.get(l["id"], {}).get("lote"),
+                    "fecha_caducidad": lotes_por_linea.get(l["id"], {}).get("fecha_caducidad"),
                 }
                 for l in lineas
             ],
@@ -2176,7 +2313,8 @@ def actualizar_documento(
 
         iva_groups: dict[float, dict] = {}
         for l in lineas_validas:
-            importe = round(l.unidades * l.precio, 6)
+            dto_factor = 1 - (l.dto or 0) / 100
+            importe = round(l.unidades * l.precio * dto_factor, 6)
             piva = l.piva
             if piva not in iva_groups:
                 iva_groups[piva] = {"base": Decimal("0"), "iva_importe": Decimal("0")}
@@ -2224,35 +2362,123 @@ def actualizar_documento(
             },
         )
 
+        # Guardar lotes existentes antes de borrar, para restaurarlos en líneas sin lotes_asignados
+        cur.execute(
+            """
+            SELECT vl.referencia, vl.talla, vl.color,
+                   alr.id_lote, alr.tipo, alr.almacen AS alr_almacen,
+                   alr.unidades AS alr_uds, alr.gramos AS alr_gramos,
+                   alr.id_lin_origen, alr.stock_unidades, alr.stock_gramos, alr.temperatura
+            FROM articulos_lotes_registro alr
+            JOIN ventas_lineas vl ON vl.id = alr.id_lin
+            WHERE vl.idcab = %(id)s
+            """,
+            {"id": idcab},
+        )
+        lotes_backup: dict = {}
+        for row in cur.fetchall():
+            key = (row["referencia"] or "", row["talla"] or "", row["color"] or "")
+            if key not in lotes_backup:
+                lotes_backup[key] = []
+            lotes_backup[key].append(dict(row))
+
+        # Borrar registros de lotes vinculados a las líneas antiguas
+        cur.execute(
+            """
+            DELETE FROM articulos_lotes_registro
+            WHERE id_lin IN (SELECT id FROM ventas_lineas WHERE idcab = %(id)s)
+            """,
+            {"id": idcab},
+        )
         cur.execute("DELETE FROM ventas_lineas WHERE idcab = %(id)s", {"id": idcab})
 
+        almacen = current_user.almacen_autoventa or 1
         for orden, l in enumerate(lineas_validas, start=1):
-            importe = round(l.unidades * l.precio, 6)
+            dto_factor = 1 - (l.dto or 0) / 100
+            base_qty = (l.gramos or 0) if (l.tipo_unidad or 0) == 1 else l.unidades
+            importe = round(base_qty * l.precio * dto_factor, 6)
             cur.execute(
                 """
                 INSERT INTO ventas_lineas (
                     idcab, tipodoc, serie, numero, cli_codigo,
                     orden, fecha,
                     referencia, descripcion,
-                    unidades, precio, importe, piva,
-                    coste, pmp
+                    unidades, gramos, precio, importe, piva,
+                    pdto1, talla, color,
+                    tipo_unidad, almacen,
+                    coste, pmp, usuario
                 ) VALUES (
                     %(idcab)s, %(tipodoc)s, %(serie)s, %(numero)s, %(cli_codigo)s,
                     %(orden)s, %(fecha)s,
                     %(referencia)s, %(descripcion)s,
-                    %(unidades)s, %(precio)s, %(importe)s, %(piva)s,
-                    0, 0
-                )
+                    %(unidades)s, %(gramos)s, %(precio)s, %(importe)s, %(piva)s,
+                    %(pdto1)s, %(talla)s, %(color)s,
+                    %(tipo_unidad)s, %(almacen)s,
+                    0, 0, %(usuario)s
+                ) RETURNING id
                 """,
                 {
                     "idcab": idcab, "tipodoc": tipodoc, "serie": serie,
                     "numero": numero, "cli_codigo": body.cli_codigo,
                     "orden": orden, "fecha": today,
                     "referencia": l.referencia, "descripcion": l.descripcion,
-                    "unidades": l.unidades, "precio": l.precio,
-                    "importe": importe, "piva": l.piva,
+                    "unidades": l.unidades, "gramos": l.gramos or 0,
+                    "precio": l.precio, "importe": importe, "piva": l.piva,
+                    "pdto1": l.dto or 0, "talla": l.talla or "", "color": l.color or "",
+                    "tipo_unidad": l.tipo_unidad or 0, "almacen": almacen,
+                    "usuario": current_user.id,
                 },
             )
+            id_lin = cur.fetchone()["id"]
+
+            # Guardar movimientos de lotes si la línea tiene lotes asignados
+            if l.lotes_asignados:
+                for asig in l.lotes_asignados:
+                    id_lote = asig.get("id") if isinstance(asig, dict) else getattr(asig, "id", None)
+                    asignar = asig.get("asignar") if isinstance(asig, dict) else getattr(asig, "asignar", 0)
+                    if not id_lote or not asignar:
+                        continue
+                    es_doble = (l.tipo_unidad or 0) == 1
+                    uds_mov   = 0       if es_doble else asignar
+                    gramos_mov = asignar if es_doble else 0
+                    cur.execute(
+                        """
+                        INSERT INTO articulos_lotes_registro
+                            (id_lote, tipo, id_lin, almacen, unidades, gramos,
+                             id_lin_origen, stock_unidades, stock_gramos, temperatura)
+                        VALUES
+                            (%(id_lote)s, 0, %(id_lin)s, %(almacen)s, %(uds)s, %(gramos)s,
+                             0, 0, 0, 0)
+                        """,
+                        {"id_lote": id_lote, "id_lin": id_lin, "almacen": almacen,
+                         "uds": uds_mov, "gramos": gramos_mov},
+                    )
+            else:
+                # Sin lotes_asignados: restaurar los lotes que tenía antes de la edición
+                key = (l.referencia or "", l.talla or "", l.color or "")
+                for lote_rec in lotes_backup.get(key, []):
+                    cur.execute(
+                        """
+                        INSERT INTO articulos_lotes_registro
+                            (id_lote, tipo, id_lin, almacen, unidades, gramos,
+                             id_lin_origen, stock_unidades, stock_gramos, temperatura)
+                        VALUES
+                            (%(id_lote)s, %(tipo)s, %(id_lin)s, %(almacen)s, %(uds)s, %(gramos)s,
+                             %(id_lin_origen)s, %(stock_uds)s, %(stock_gramos)s, %(temperatura)s)
+                        """,
+                        {
+                            "id_lote": lote_rec["id_lote"],
+                            "tipo": lote_rec["tipo"],
+                            "id_lin": id_lin,
+                            "almacen": lote_rec["alr_almacen"],
+                            "uds": lote_rec["alr_uds"],
+                            "gramos": lote_rec["alr_gramos"],
+                            "id_lin_origen": lote_rec["id_lin_origen"],
+                            "stock_uds": lote_rec["stock_unidades"],
+                            "stock_gramos": lote_rec["stock_gramos"],
+                            "temperatura": lote_rec["temperatura"],
+                        },
+                    )
 
         conn.commit()
         return {
@@ -2291,9 +2517,45 @@ def guardar_firma(
     session: Session = Depends(get_session),
 ):
     _require_autoventa(current_user)
-    # Store the firma as an UPDATE to observaciones (prefixed) if no dedicated field exists
-    # Silently succeed to not block the UI flow
+    from app.models.app_models import FirmaAutoventa
+    from sqlmodel import select
+    # Upsert: si ya existe firma para este documento, actualizarla
+    existing = session.exec(
+        select(FirmaAutoventa)
+        .where(FirmaAutoventa.empresa_id == empresa.id)
+        .where(FirmaAutoventa.idcab == idcab)
+    ).first()
+    if existing:
+        existing.firma_data_url = body.firma
+        session.add(existing)
+    else:
+        session.add(FirmaAutoventa(
+            empresa_id=empresa.id,
+            idcab=idcab,
+            firma_data_url=body.firma,
+        ))
+    session.commit()
     return {"ok": True}
+
+
+@router.get("/documento/{idcab}/firma")
+def get_firma(
+    idcab: int,
+    empresa: Empresa = Depends(get_empresa_from_local),
+    current_user: Usuario = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    _require_autoventa(current_user)
+    from app.models.app_models import FirmaAutoventa
+    from sqlmodel import select
+    firma = session.exec(
+        select(FirmaAutoventa)
+        .where(FirmaAutoventa.empresa_id == empresa.id)
+        .where(FirmaAutoventa.idcab == idcab)
+    ).first()
+    if not firma:
+        return {"firma": None}
+    return {"firma": firma.firma_data_url}
 
 
 # ── Registrar visita ──────────────────────────────────────────────────────

@@ -514,6 +514,7 @@ def create_usuario(
         precargar_historial_autoventa=body.precargar_historial_autoventa,
         serie_expediciones=json.dumps(body.serie_expediciones or []),
         caja_reparto=body.caja_reparto,
+        ticket_design_autoventa=body.ticket_design_autoventa,
     )
     session.add(user)
     session.flush()

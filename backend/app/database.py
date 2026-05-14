@@ -18,7 +18,7 @@ def get_session():
 
 def create_db_and_tables():
     """Create all tables on startup if they do not exist."""
-    from app.models.app_models import Empresa, Local, Usuario, UsuarioLocal, Visita  # noqa: F401
+    from app.models.app_models import Empresa, Local, Usuario, UsuarioLocal, Visita, FirmaAutoventa  # noqa: F401
     SQLModel.metadata.create_all(engine)
     _run_migrations()
 
@@ -62,6 +62,9 @@ def _run_migrations():
         ))
         conn.execute(text(
             "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS paper_width_impresora INTEGER DEFAULT 80"
+        ))
+        conn.execute(text(
+            "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS ticket_design_autoventa INTEGER DEFAULT 1"
         ))
         conn.execute(text(
             "ALTER TABLE locales ADD COLUMN IF NOT EXISTS tipo VARCHAR(20) DEFAULT 'definitiva'"

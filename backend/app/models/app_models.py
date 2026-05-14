@@ -78,6 +78,7 @@ class Usuario(SQLModel, table=True):
     precargar_historial_autoventa: bool = Field(default=True)  # precargar ventas 90 días al seleccionar cliente
     caja_reparto: Optional[int] = Field(default=None)  # caja donde van cobros del reparto
     paper_width_impresora: int = Field(default=80)  # ancho papel impresora térmica: 80 o 100 mm
+    ticket_design_autoventa: int = Field(default=1)  # diseño ticket: 1=clásico estructurado, 2=recibo moderno
     # Expediciones config (JSON array: ["CI 26", "CI 27"])
     serie_expediciones: str = Field(default='[]', max_length=500)
 
@@ -110,4 +111,14 @@ class PrintJob(SQLModel, table=True):
     user_id: int = Field(index=True)
     payload_b64: str  # bytes ESC/POS codificados en base64
     status: str = Field(default="pending")  # pending | done
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class FirmaAutoventa(SQLModel, table=True):
+    __tablename__ = "firmas_autoventa"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    empresa_id: Optional[int] = Field(default=None, foreign_key="empresas.id", index=True)
+    idcab: int = Field(index=True)  # id del documento en PostgreSQL ERP
+    firma_data_url: str  # base64 data URL de la imagen de la firma
     created_at: datetime = Field(default_factory=datetime.utcnow)

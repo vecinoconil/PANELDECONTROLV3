@@ -130,6 +130,7 @@ interface DocListaItem {
     fecha: string | null
     cli_codigo: number
     cli_nombre: string
+    cli_alias: string
     total: number
     pendiente: number
     finalizado: boolean
@@ -151,9 +152,13 @@ interface LineaDetalle {
     unidad: string
     precio: number
     dto: number
+    importe: number
     piva: number
     talla: string
     color: string
+    es_canon?: boolean
+    lote?: string
+    fecha_caducidad?: string
 }
 interface DetalleAlbaran {
     id: number
@@ -877,12 +882,16 @@ export default function Autoventa() {
         unidades: number
         gramos?: number
         tipo_unidad?: number
+        unidad?: string
         precio: number
         dto: number
         importe: number
         piva: number
         talla: string
         color: string
+        es_canon?: boolean
+        lote?: string
+        fecha_caducidad?: string
     }
     interface DetalleDoc {
         id: number
@@ -899,11 +908,16 @@ export default function Autoventa() {
     const [detalleDocLoading, setDetalleDocLoading] = useState(false)
     const [quickPrintingDocId, setQuickPrintingDocId] = useState<number | null>(null)
 
-    const handleQuickPrint = async (cliCodigo: number, doc: { id: number; tipodoc: number; tipodoc_label: string; serie: string; numero: number; fecha: string | null; cli_nombre: string; total: number }) => {
+    const handleQuickPrint = async (cliCodigo: number, doc: { id: number; tipodoc: number; tipodoc_label: string; serie: string; numero: number; fecha: string | null; cli_nombre: string; cli_alias?: string; total: number }) => {
         setQuickPrintingDocId(doc.id)
         try {
-            const r = await api.get<DetalleDoc>(`/api/autoventa/clientes/${cliCodigo}/documentos/${doc.id}/lineas`)
+            const [r, cliR, firmaR] = await Promise.all([
+                api.get<DetalleDoc>(`/api/autoventa/clientes/${cliCodigo}/documentos/${doc.id}/lineas`),
+                api.get<ClienteResult>(`/api/autoventa/clientes/${cliCodigo}`),
+                api.get<{ firma: string | null }>(`/api/autoventa/documento/${doc.id}/firma`).catch(() => ({ data: { firma: null } })),
+            ])
             const d = r.data
+            const cli = cliR.data
             const cfg = getPrintCfg()
             await printTicket(
                 {
@@ -912,20 +926,30 @@ export default function Autoventa() {
                     numero: doc.numero,
                     fecha: doc.fecha,
                     cli_nombre: doc.cli_nombre,
+                    cli_cif: cli.cif,
+                    cli_alias: cli.alias,
+                    cli_direccion: cli.direccion,
+                    cli_localidad: cli.localidad,
+                    cli_cpostal: cli.cpostal,
                     lineas: d.lineas.map(l => ({
                         descripcion: l.descripcion,
                         unidades: String(l.unidades),
                         gramos: l.gramos ? String(l.gramos) : undefined,
                         tipo_unidad: l.tipo_unidad ?? 0,
-                        unidad: String(l.unidades),
+                        unidad: l.unidad || '',
                         precio: l.precio,
                         dto: l.dto,
                         piva: l.piva,
                         talla: l.talla,
                         color: l.color,
+                        importe: l.importe,
+                        es_canon: l.es_canon,
+                        lote: l.lote,
+                        fecha_caducidad: l.fecha_caducidad,
                     })),
                     total: doc.total,
                     agenteNombre: agenteNombre || undefined,
+                    firmaDataUrl: firmaR.data.firma ?? undefined,
                 },
                 cfg,
             )
@@ -1281,6 +1305,7 @@ export default function Autoventa() {
     // Post-venta: firma
     const [showFirmaModal, setShowFirmaModal] = useState(false)
     const [firmaGuardada, setFirmaGuardada] = useState(false)
+    const [firmaDataUrl, setFirmaDataUrl] = useState<string | null>(null)
     const [firmaGuardando, setFirmaGuardando] = useState(false)
     const [firmaError, setFirmaError] = useState('')
 
@@ -1302,7 +1327,7 @@ export default function Autoventa() {
     // Refrescar perfil al montar para tener precargar_historial_autoventa actualizado
     useEffect(() => { refreshUser().catch(() => {}) }, [])
 
-    // Sincronizar paper_width desde el perfil del usuario al localStorage
+    // Sincronizar paper_width y ticket_design desde el perfil del usuario al localStorage
     useEffect(() => {
         const w = typedUser?.paper_width_impresora
         if (w === 80 || w === 100) {
@@ -1311,6 +1336,31 @@ export default function Autoventa() {
             setPaperWidth(w)
         }
     }, [typedUser?.paper_width_impresora])
+
+    useEffect(() => {
+        const d = typedUser?.ticket_design_autoventa
+        if (d === 1 || d === 2) {
+            const cfg = loadPrinterConfig()
+            savePrinterConfig({ ...cfg, ticket_design: d })
+        }
+    }, [typedUser?.ticket_design_autoventa])
+
+    // Sincronizar empresa-info del ERP al localStorage (datos cabecera ticket)
+    useEffect(() => {
+        api.get<{ nombre?: string; cif?: string; direccion?: string; localidad?: string; cpostal?: string; telefono1?: string; email?: string }>('/api/autoventa/empresa-info')
+            .then(r => {
+                const emp = r.data
+                const cfg = loadPrinterConfig()
+                savePrinterConfig({
+                    ...cfg,
+                    emp_nombre:    emp.nombre    || cfg.emp_nombre    || '',
+                    emp_cif:       emp.cif       || cfg.emp_cif       || '',
+                    emp_direccion: emp.direccion ? `${emp.direccion}${emp.cpostal || emp.localidad ? `, ${[emp.cpostal, emp.localidad].filter(Boolean).join(' ')}` : ''}` : (cfg.emp_direccion || ''),
+                    emp_telefono:  emp.telefono1 || cfg.emp_telefono  || '',
+                    emp_email:     emp.email     || cfg.emp_email     || '',
+                })
+            }).catch(() => {})
+    }, [])
 
     // Load agente info + cache clientes on mount
     useEffect(() => {
@@ -2034,8 +2084,27 @@ export default function Autoventa() {
             setPostVentaEmail(clienteSeleccionado.email || '')
             setPostVentaEmailEnviado(false)
             setPostVentaEmailError('')
-            setFirmaGuardada(false)
             setFirmaError('')
+            if (editandoId) {
+                const idFetch = editandoId
+                api.get<{ firma: string | null }>(`/api/autoventa/documento/${idFetch}/firma`)
+                    .then(fr => {
+                        if (fr.data.firma) {
+                            setFirmaDataUrl(fr.data.firma)
+                            setFirmaGuardada(true)
+                        } else {
+                            setFirmaGuardada(false)
+                            setFirmaDataUrl(null)
+                        }
+                    })
+                    .catch(() => {
+                        setFirmaGuardada(false)
+                        setFirmaDataUrl(null)
+                    })
+            } else {
+                setFirmaGuardada(false)
+                setFirmaDataUrl(null)
+            }
         } catch (e: any) {
             setError(e.response?.data?.detail || 'Error creando documento')
         } finally {
@@ -2091,6 +2160,7 @@ export default function Autoventa() {
         try {
             await api.post(`/api/autoventa/documento/${resultado.idcab}/firma`, { firma: dataUrl })
             setFirmaGuardada(true)
+            setFirmaDataUrl(dataUrl)
         } catch (e: any) {
             setFirmaError(e.response?.data?.detail || 'Error guardando firma')
         } finally {
@@ -2136,6 +2206,7 @@ export default function Autoventa() {
         setArticuloResults([])
         setError('')
         setFirmaGuardada(false)
+        setFirmaDataUrl(null)
         setFirmaError('')
         setShowFirmaModal(false)
         setEditandoId(null)
@@ -2162,6 +2233,11 @@ export default function Autoventa() {
         setPrintError('')
         setPrintOk(false)
         try {
+            const [lineasR, firmaR] = await Promise.all([
+                api.get<DetalleDoc>(`/api/autoventa/clientes/${resultado.cli_codigo}/documentos/${resultado.idcab}/lineas`),
+                Promise.resolve({ data: { firma: firmaDataUrl } }),
+            ])
+            const d = lineasR.data
             await printTicket(
                 {
                     tipodoc_label: resultado.tipodoc_label,
@@ -2169,21 +2245,30 @@ export default function Autoventa() {
                     numero: resultado.numero,
                     fecha: new Date().toISOString(),
                     cli_nombre: clienteSeleccionado.nombre,
-                    lineas: lineas.map(l => ({
+                    cli_cif: clienteSeleccionado.cif,
+                    cli_alias: clienteSeleccionado.alias,
+                    cli_direccion: clienteSeleccionado.direccion,
+                    cli_localidad: clienteSeleccionado.localidad,
+                    cli_cpostal: clienteSeleccionado.cpostal,
+                    lineas: d.lineas.map(l => ({
                         descripcion: l.descripcion,
-                        unidades: l.unidades,
-                        gramos: l.gramos,
-                        tipo_unidad: l.tipo_unidad,
-                        unidad: l.unidad,
+                        unidades: String(l.unidades),
+                        gramos: l.gramos ? String(l.gramos) : undefined,
+                        tipo_unidad: l.tipo_unidad ?? 0,
+                        unidad: l.unidad || '',
                         precio: l.precio,
                         dto: l.dto,
                         piva: l.piva,
                         talla: l.talla,
                         color: l.color,
+                        importe: l.importe,
                         es_canon: l.es_canon,
+                        lote: l.lote,
+                        fecha_caducidad: l.fecha_caducidad,
                     })),
                     total: resultado.total,
                     agenteNombre: agenteNombre || undefined,
+                    firmaDataUrl: firmaR.data.firma ?? undefined,
                 },
                 cfg,
             )
@@ -2197,10 +2282,12 @@ export default function Autoventa() {
 
     // ── Imprimir desde detalle de documento (detalleAlbaran / detalleDoc) ───
     const handlePrintDoc = async (doc: {
+        id: number
         tipodoc_label: string
         serie: string
         numero: number
         fecha: string | null
+        cli_codigo: number
         cli_nombre: string
         total: number
         lineas: Array<{
@@ -2214,6 +2301,10 @@ export default function Autoventa() {
             gramos?: number
             tipo_unidad?: number
             unidad?: string
+            importe?: number
+            es_canon?: boolean
+            lote?: string
+            fecha_caducidad?: string
         }>
     }) => {
         const cfg = getPrintCfg()
@@ -2221,6 +2312,11 @@ export default function Autoventa() {
         setDetallePrintError('')
         setDetallePrintOk(false)
         try {
+            const [cliR, firmaR] = await Promise.all([
+                api.get<ClienteResult>(`/api/autoventa/clientes/${doc.cli_codigo}`),
+                api.get<{ firma: string | null }>(`/api/autoventa/documento/${doc.id}/firma`).catch(() => ({ data: { firma: null } })),
+            ])
+            const cli = cliR.data
             await printTicket(
                 {
                     tipodoc_label: doc.tipodoc_label,
@@ -2228,20 +2324,30 @@ export default function Autoventa() {
                     numero: doc.numero,
                     fecha: doc.fecha,
                     cli_nombre: doc.cli_nombre,
+                    cli_cif: cli.cif,
+                    cli_alias: cli.alias,
+                    cli_direccion: cli.direccion,
+                    cli_localidad: cli.localidad,
+                    cli_cpostal: cli.cpostal,
                     lineas: doc.lineas.map(l => ({
                         descripcion: l.descripcion,
                         unidades: String(l.unidades),
                         gramos: l.gramos ? String(l.gramos) : undefined,
                         tipo_unidad: l.tipo_unidad ?? 0,
-                        unidad: l.unidad,
+                        unidad: l.unidad || '',
                         precio: l.precio,
                         dto: l.dto,
                         piva: l.piva,
                         talla: l.talla,
                         color: l.color,
+                        importe: l.importe,
+                        es_canon: l.es_canon,
+                        lote: l.lote,
+                        fecha_caducidad: l.fecha_caducidad,
                     })),
                     total: doc.total,
                     agenteNombre: agenteNombre || undefined,
+                    firmaDataUrl: firmaR.data.firma ?? undefined,
                 },
                 cfg,
             )
@@ -2624,65 +2730,76 @@ export default function Autoventa() {
                                     return (
                                     <div
                                         key={doc.id}
-                                        className={`flex items-center gap-3 px-4 py-3 ${esClickable ? 'cursor-pointer hover:bg-slate-50 active:bg-slate-100' : ''}`}
+                                        className={`flex flex-col gap-0.5 px-4 py-3 ${esClickable ? 'cursor-pointer hover:bg-slate-50 active:bg-slate-100' : ''}`}
                                         onClick={() => {
                                             if (esPedido) editarPedido(doc.id)
                                             else if (esAlbaran) verDetalleAlbaran(doc.id)
                                         }}
                                     >
-                                        <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 mb-0.5">
-                                                <span className="text-xs font-mono font-semibold text-brand">{doc.serie}-{doc.numero}</span>
-                                                <span className="text-[10px] text-slate-400">
+                                        {/* Fila 1: serie/fecha izda — importe + imprimir dcha */}
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                                                <span className="text-xs font-mono font-semibold text-brand flex-shrink-0">{doc.serie}-{doc.numero}</span>
+                                                <span className="text-[10px] text-slate-400 flex-shrink-0">
                                                     {doc.fecha ? new Date(doc.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—'}
                                                 </span>
                                                 {tipodoc === 2 && doc.finalizado && (
-                                                    <span className="text-[9px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-full font-medium">Finalizado</span>
+                                                    <span className="text-[9px] bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">Finalizado</span>
                                                 )}
                                                 {esCobrado && (
-                                                    <span className="text-[9px] bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full font-medium">Cobrado</span>
+                                                    <span className="text-[9px] bg-green-100 text-green-600 px-1.5 py-0.5 rounded-full font-medium flex-shrink-0">Cobrado</span>
                                                 )}
                                             </div>
-                                            <p className="text-sm font-medium text-slate-700 truncate">{doc.cli_nombre}</p>
+                                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                                                <div className="text-right">
+                                                    <span className="text-sm font-bold text-slate-800 whitespace-nowrap">
+                                                        {doc.total.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+                                                    </span>
+                                                </div>
+                                                {/* Botón imprimir */}
+                                                {(esPedido || esAlbaran) && (
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); handleQuickPrint(doc.cli_codigo, { id: doc.id, tipodoc: tipodoc!, tipodoc_label: TIPOS.find(t => t.id === tipodoc)?.label ?? '', serie: doc.serie, numero: doc.numero, fecha: doc.fecha, cli_nombre: doc.cli_nombre, cli_alias: doc.cli_alias, total: doc.total }) }}
+                                                        disabled={quickPrintingDocId === doc.id}
+                                                        className="flex items-center justify-center w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 flex-shrink-0"
+                                                        title="Imprimir ticket"
+                                                    >
+                                                        {quickPrintingDocId === doc.id
+                                                            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                            : <Printer className="w-3.5 h-3.5" />
+                                                        }
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-2 flex-shrink-0">
-                                            <div className="text-right">
-                                                <span className="text-sm font-bold text-slate-800">
-                                                    {doc.total.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
-                                                </span>
+                                        {/* Fila 2: nombre cliente izda — badge acción dcha */}
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="min-w-0 flex-1 overflow-hidden">
+                                                <p className="text-sm font-semibold text-slate-800 truncate leading-tight">{doc.cli_alias || doc.cli_nombre}</p>
+                                                {doc.cli_alias && doc.cli_alias !== doc.cli_nombre && (
+                                                    <p className="text-[11px] text-slate-400 truncate leading-tight">{doc.cli_nombre}</p>
+                                                )}
                                                 {esCobrable && doc.pendiente < doc.total && (
                                                     <p className="text-[11px] text-red-500 font-medium leading-tight">
                                                         Pte: {doc.pendiente.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€
                                                     </p>
                                                 )}
                                             </div>
-                                            {/* Botón imprimir (pedidos y albaranes) */}
-                                            {(esPedido || esAlbaran) && (
-                                                <button
-                                                    onClick={e => { e.stopPropagation(); handleQuickPrint(doc.cli_codigo, { id: doc.id, tipodoc: tipodoc!, tipodoc_label: TIPOS.find(t => t.id === tipodoc)?.label ?? '', serie: doc.serie, numero: doc.numero, fecha: doc.fecha, cli_nombre: doc.cli_nombre, total: doc.total }) }}
-                                                    disabled={quickPrintingDocId === doc.id}
-                                                    className="flex items-center justify-center w-8 h-8 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 disabled:opacity-50 flex-shrink-0"
-                                                    title="Imprimir ticket"
-                                                >
-                                                    {quickPrintingDocId === doc.id
-                                                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                                        : <Printer className="w-3.5 h-3.5" />
-                                                    }
-                                                </button>
-                                            )}
-                                            {esEditable && (
-                                                <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">Editar</span>
-                                            )}
-                                            {esPedido && doc.finalizado && (
-                                                <span className="text-[10px] text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded-full">Ver</span>
-                                            )}
-                                            {esAlbaran && (
-                                                detalleLoading
-                                                    ? <Loader2 className="w-4 h-4 text-slate-400 animate-spin" />
-                                                    : <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
-                                                        {esCobrable ? 'Ver / Cobrar' : 'Ver'}
-                                                      </span>
-                                            )}
+                                            <div className="flex-shrink-0">
+                                                {esEditable && (
+                                                    <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">Editar</span>
+                                                )}
+                                                {esPedido && doc.finalizado && (
+                                                    <span className="text-[10px] text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded-full">Ver</span>
+                                                )}
+                                                {esAlbaran && (
+                                                    detalleLoading
+                                                        ? <Loader2 className="w-4 h-4 text-slate-400 animate-spin" />
+                                                        : <span className="text-[10px] text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">
+                                                            {esCobrable ? 'Ver / Cobrar' : 'Ver'}
+                                                          </span>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                     )
@@ -3671,10 +3788,12 @@ export default function Autoventa() {
                                 {/* Imprimir */}
                                 <button
                                     onClick={() => handlePrintDoc({
+                                        id: detalleDoc.id,
                                         tipodoc_label: detalleDoc.tipodoc === 4 ? 'Albarán' : detalleDoc.tipodoc === 8 ? 'Factura' : 'Pedido',
                                         serie: detalleDoc.serie,
                                         numero: detalleDoc.numero,
                                         fecha: detalleDoc.fecha,
+                                        cli_codigo: detalleDoc.cli_codigo,
                                         cli_nombre: detalleDoc.cli_nombre,
                                         total: detalleDoc.total,
                                         lineas: detalleDoc.lineas,
@@ -4064,6 +4183,11 @@ export default function Autoventa() {
                                             {l.talla && <span className="ml-1 text-slate-500">T:{l.talla}</span>}
                                             {l.color && <span className="ml-1 text-slate-500">C:{l.color}</span>}
                                         </p>
+                                        {l.lote && (
+                                            <p className="text-xs text-indigo-500 mt-0.5">
+                                                Lote: {l.lote}{l.fecha_caducidad ? ` · Cad: ${l.fecha_caducidad}` : ''}
+                                            </p>
+                                        )}
                                         <p className="text-xs text-slate-500 mt-0.5">
                                             {l.unidades} ud × {l.precio.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}€
                                             {l.dto > 0 && <span className="ml-1 text-amber-600">-{l.dto}%</span>}
@@ -4113,10 +4237,12 @@ export default function Autoventa() {
                         {/* Botón imprimir */}
                         <button
                             onClick={() => handlePrintDoc({
+                                id: detalleAlbaran.id,
                                 tipodoc_label: detalleAlbaran.tipodoc === 4 ? 'Albarán' : detalleAlbaran.tipodoc === 2 ? 'Pedido' : 'Factura',
                                 serie: detalleAlbaran.serie,
                                 numero: detalleAlbaran.numero,
                                 fecha: detalleAlbaran.fecha,
+                                cli_codigo: detalleAlbaran.cli_codigo,
                                 cli_nombre: detalleAlbaran.cli_nombre,
                                 total: detalleAlbaran.total,
                                 lineas: detalleAlbaran.lineas,

@@ -21,6 +21,7 @@ export interface PrinterConfig {
   emp_logo:      string   // base64 data URL (vacío = sin logo)
   paper_width:   80 | 100  // ancho del papel en mm
   precargar_historial: boolean  // precargar ventas anteriores 90 días al seleccionar cliente
+  ticket_design: 1 | 2  // 1=clásico estructurado, 2=recibo moderno
 }
 
 export function loadPrinterConfig(): Partial<PrinterConfig> {
@@ -51,6 +52,9 @@ export interface TicketLinea {
   talla?: string
   color?: string
   es_canon?: boolean
+  importe?: number
+  lote?: string
+  fecha_caducidad?: string
 }
 
 export interface TicketData {
@@ -59,6 +63,11 @@ export interface TicketData {
   numero: number
   fecha?: string | null
   cli_nombre: string
+  cli_cif: string
+  cli_alias: string
+  cli_direccion: string
+  cli_localidad: string
+  cli_cpostal: string
   lineas: TicketLinea[]
   total: number
   agenteNombre?: string
@@ -86,13 +95,15 @@ function formatDate(d: string | null | undefined): string {
 
 // ─── Generar HTML del ticket ─────────────────────────────────────────────────
 function buildTicketHtml(data: TicketData, cfg: Partial<PrinterConfig>): string {
+  if ((cfg.ticket_design ?? 1) === 2) return buildTicketHtmlD2(data, cfg)
+
   // ── Totales por IVA ──────────────────────────────────────────────────────
   const totalesMap: Record<number, { piva: number; base: number; cuota: number }> = {}
   for (const lin of data.lineas) {
     const uds = parseFloat(String(lin.unidades)) || 0
     if (uds === 0 && !lin.es_canon) continue
     const precioNeto = lin.precio * (1 - lin.dto / 100)
-    const importe = uds * precioNeto
+    const importe = lin.importe ?? (uds * precioNeto)
     const p = lin.piva
     if (!totalesMap[p]) totalesMap[p] = { piva: p, base: 0, cuota: 0 }
     totalesMap[p].base  += importe
@@ -106,7 +117,7 @@ function buildTicketHtml(data: TicketData, cfg: Partial<PrinterConfig>): string 
     const uds = parseFloat(String(lin.unidades)) || 0
     if (uds === 0 && !lin.es_canon) return ''
     const precioNeto = lin.precio * (1 - lin.dto / 100)
-    const importe    = uds * precioNeto
+    const importe    = lin.importe ?? (uds * precioNeto)
     let desc = lin.descripcion
     if (lin.talla || lin.color) desc += ` (${[lin.talla, lin.color].filter(Boolean).join('/')})`
     if (lin.es_canon) desc = `&nbsp;&nbsp;${esc(desc)}`
@@ -119,13 +130,19 @@ function buildTicketHtml(data: TicketData, cfg: Partial<PrinterConfig>): string 
     const gramosHtml = (lin.tipo_unidad === 1 && lin.gramos)
       ? `<div class="extra">&nbsp;&nbsp;&rarr; ${parseFloat(String(lin.gramos)).toLocaleString('es-ES', { maximumFractionDigits: 3 })} ${esc(lin.unidad || 'kg')}</div>`
       : ''
+    const loteHtml = lin.lote
+      ? `<div class="extra">&nbsp;&nbsp;Lote: ${esc(lin.lote)}</div>`
+      : ''
+    const cadHtml = lin.fecha_caducidad
+      ? `<div class="extra">&nbsp;&nbsp;Cad: ${esc(lin.fecha_caducidad)}</div>`
+      : ''
 
     return `<div class="line">
   <span class="ld">${desc}</span>
   <span class="lu">${udsStr}</span>
-  <span class="lp">${money(precioNeto)}</span>
+  <span class="lp">${money(lin.precio)}</span>
   <span class="li">${money(importe)}</span>
-</div>${dtoHtml}${gramosHtml}`
+</div>${dtoHtml}${gramosHtml}${loteHtml}${cadHtml}`
   }).join('\n')
 
   const ivaRowsHtml = totalesArr.map(t =>
@@ -193,7 +210,11 @@ ${cfg.emp_email ? `<div class="emp-i">${esc(cfg.emp_email)}</div>` : ''}
 <div class="doc-row"><span>${esc(docLabel)}</span><span>${esc(fechaStr)}</span></div>
 ${agentHtml}
 <div class="sep">${S}</div>
-<div class="cli-row">Cliente: ${esc(data.cli_nombre)}</div>
+<div class="cli-row">${esc(data.cli_nombre)}</div>
+${data.cli_alias && data.cli_alias !== data.cli_nombre ? `<div class="emp-i">Alias: ${esc(data.cli_alias)}</div>` : ''}
+${data.cli_cif ? `<div class="emp-i">CIF: ${esc(data.cli_cif)}</div>` : ''}
+${data.cli_direccion ? `<div class="emp-i">${esc(data.cli_direccion)}</div>` : ''}
+${data.cli_localidad || data.cli_cpostal ? `<div class="emp-i">${esc([data.cli_cpostal, data.cli_localidad].filter(Boolean).join(' '))}</div>` : ''}
 <div class="sep">${S}</div>
 <div class="hdr">
   <span class="hd">DESCRIPCIÓN</span>
@@ -213,6 +234,535 @@ ${firmaHtml}
 </body></html>`
 }
 
+// ─── HTML Diseño 2: Recibo Moderno ────────────────────────────────────────────
+function buildTicketHtmlD2(data: TicketData, cfg: Partial<PrinterConfig>): string {
+  const totalesMap: Record<number, { piva: number; base: number; cuota: number }> = {}
+  for (const lin of data.lineas) {
+    const uds = parseFloat(String(lin.unidades)) || 0
+    if (uds === 0 && !lin.es_canon) continue
+    const precioNeto = lin.precio * (1 - lin.dto / 100)
+    const importe = lin.importe ?? (uds * precioNeto)
+    const p = lin.piva
+    if (!totalesMap[p]) totalesMap[p] = { piva: p, base: 0, cuota: 0 }
+    totalesMap[p].base  += importe
+    totalesMap[p].cuota += importe * (p / 100)
+  }
+  const totalesArr = Object.values(totalesMap).sort((a, b) => a.piva - b.piva)
+  const totalBase  = totalesArr.reduce((s, t) => s + t.base, 0)
+  const totalItems = data.lineas.filter(l => (parseFloat(String(l.unidades)) || 0) !== 0 || l.es_canon).length
+
+  const linesHtml = data.lineas.map(lin => {
+    const uds = parseFloat(String(lin.unidades)) || 0
+    if (uds === 0 && !lin.es_canon) return ''
+    const precioNeto = lin.precio * (1 - lin.dto / 100)
+    const importe    = lin.importe ?? (uds * precioNeto)
+    let desc = lin.descripcion
+    if (lin.talla || lin.color) desc += ` (${[lin.talla, lin.color].filter(Boolean).join('/')})`
+    const udsStr = uds.toLocaleString('es-ES', { maximumFractionDigits: 3 })
+    const dtoHtml = lin.dto > 0 ? `<div class="d2-extra">Dto ${lin.dto}%</div>` : ''
+    const gramosHtml = (lin.tipo_unidad === 1 && lin.gramos)
+      ? `<div class="d2-extra">&rarr; ${parseFloat(String(lin.gramos)).toLocaleString('es-ES', { maximumFractionDigits: 3 })} ${esc(lin.unidad || 'kg')}</div>`
+      : ''
+    const loteHtml = lin.lote
+      ? `<div class="d2-extra">Lote: ${esc(lin.lote)}</div>`
+      : ''
+    const cadHtml = lin.fecha_caducidad
+      ? `<div class="d2-extra">Cad: ${esc(lin.fecha_caducidad)}</div>`
+      : ''
+    return `<div class="d2-line">
+  <span class="d2-desc">${lin.es_canon ? '&nbsp;&nbsp;' : ''}${esc(desc)}</span>
+  <span class="d2-uds">${udsStr}</span>
+  <span class="d2-prc">${money(lin.precio)}</span>
+  <span class="d2-imp">${money(importe)}</span>
+</div>${dtoHtml}${gramosHtml}${loteHtml}${cadHtml}`
+  }).join('\n')
+
+  const ivaRowsHtml = totalesArr.map(t =>
+    `<div class="d2-tr"><span class="d2-tl">IVA ${t.piva}%</span><span class="d2-tv">${money(t.cuota)} €</span></div>`
+  ).join('\n')
+
+  const logoHtml = cfg.emp_logo
+    ? `<div class="d2-logo"><img src="${cfg.emp_logo}" style="max-width:100%;max-height:28mm" alt="Logo"></div>`
+    : ''
+  const firmaHtml = data.firmaDataUrl ? `
+<div style="text-align:center;margin-top:3mm">
+  <div style="font-weight:bold;font-size:8pt;margin-bottom:1mm">FIRMA DEL CLIENTE</div>
+  <img src="${data.firmaDataUrl}" style="max-width:100mm;border-top:1px solid #000;padding-top:1mm" alt="Firma">
+</div>` : ''
+
+  const fechaStr = formatDate(data.fecha)
+  const docLabel = `${data.tipodoc_label.toUpperCase()} ${data.serie}-${data.numero}`
+  const W = (cfg.paper_width ?? 80) === 100 ? '104mm' : '74mm'
+
+  return `<!DOCTYPE html><html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Ticket ${esc(docLabel)}</title>
+<style>
+@page { size: ${(cfg.paper_width ?? 80) === 100 ? '110mm' : '80mm'} auto; margin: 2mm 3mm; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; width: ${W}; color: #000; background: #fff; }
+.d2-logo   { text-align: center; margin-bottom: 2mm; }
+.d2-emp-n  { font-size: 14pt; font-weight: bold; text-align: center; letter-spacing: -0.3pt; }
+.d2-emp-i  { font-size: 8pt; text-align: center; }
+.d2-sep1   { border-top: 1px solid #000; margin: 1.5mm 0; }
+.d2-sep2   { border-top: 3px double #000; margin: 1.5mm 0; }
+.d2-doc-num{ font-size: 22pt; font-weight: bold; text-align: center; margin: 1mm 0; }
+.d2-doc-lbl{ font-size: 10pt; font-weight: bold; text-align: center; margin-bottom: 0.5mm; }
+.d2-fecha  { font-size: 8.5pt; text-align: center; margin-bottom: 1mm; }
+.d2-cli-n  { font-weight: bold; font-size: 9.5pt; margin-bottom: 0.5mm; }
+.d2-cli-i  { font-size: 8pt; }
+.d2-hdr    { display: flex; font-weight: bold; font-size: 8pt; border-bottom: 1px solid #000; padding: 1mm 0 0.5mm; margin-bottom: 0.5mm; }
+.d2-hd     { flex: 1; }
+.d2-hu, .d2-hp, .d2-hi { text-align: right; flex-shrink: 0; }
+.d2-hu { width: 16mm; } .d2-hp { width: 22mm; } .d2-hi { width: 22mm; }
+.d2-line   { display: flex; font-size: 8.5pt; margin-bottom: 1mm; align-items: flex-start; }
+.d2-desc   { flex: 1; word-break: break-word; padding-right: 1mm; }
+.d2-uds, .d2-prc, .d2-imp { text-align: right; flex-shrink: 0; }
+.d2-uds { width: 16mm; } .d2-prc { width: 22mm; } .d2-imp { width: 22mm; }
+.d2-extra  { font-size: 8pt; padding-left: 2mm; margin-bottom: 0.5mm; }
+.d2-items  { display: flex; justify-content: flex-end; font-size: 8.5pt; padding: 0.5mm 0; }
+.d2-trow   { margin-top: 1mm; }
+.d2-tr     { display: flex; justify-content: space-between; font-size: 9pt; margin: 0.5mm 0; }
+.d2-tl     { font-weight: normal; }
+.d2-tv     { font-weight: normal; }
+.d2-total-box { background: #000; color: #fff; display: flex; justify-content: space-between; align-items: center; padding: 2mm 1mm; margin: 2mm 0; }
+.d2-total-lbl { font-weight: bold; font-size: 11pt; }
+.d2-total-val { font-weight: bold; font-size: 14pt; }
+.d2-num-venta { text-align: center; border: 1px solid #000; padding: 1mm 2mm; margin: 2mm 0; font-size: 9pt; }
+.d2-footer { text-align: center; font-size: 9pt; font-weight: bold; margin-top: 2mm; }
+.d2-agente { text-align: center; font-size: 8.5pt; margin: 1mm 0; }
+</style>
+</head>
+<body>
+${logoHtml}
+<div class="d2-emp-n">${esc(cfg.emp_nombre || '')}</div>
+${cfg.emp_direccion ? `<div class="d2-emp-i">${esc(cfg.emp_direccion)}</div>` : ''}
+${cfg.emp_cif || cfg.emp_telefono ? `<div class="d2-emp-i">${[cfg.emp_cif ? `CIF: ${esc(cfg.emp_cif)}` : '', cfg.emp_telefono ? `Tel: ${esc(cfg.emp_telefono)}` : ''].filter(Boolean).join(' &nbsp; ')}</div>` : ''}
+${cfg.emp_email ? `<div class="d2-emp-i">${esc(cfg.emp_email)}</div>` : ''}
+<div class="d2-sep2"></div>
+<div class="d2-doc-lbl">${esc(data.tipodoc_label.toUpperCase())}</div>
+<div class="d2-doc-num">${esc(data.serie)}-${data.numero.toString().padStart(6, '0')}</div>
+<div class="d2-fecha">${esc(fechaStr)}</div>
+${data.agenteNombre ? `<div class="d2-agente">Vendedor: ${esc(data.agenteNombre)}</div>` : ''}
+<div class="d2-sep1"></div>
+<div class="d2-cli-n">${esc(data.cli_nombre)}</div>
+${data.cli_alias && data.cli_alias !== data.cli_nombre ? `<div class="d2-cli-i">Alias: ${esc(data.cli_alias)}</div>` : ''}
+${data.cli_cif ? `<div class="d2-cli-i">CIF: ${esc(data.cli_cif)}</div>` : ''}
+${data.cli_direccion ? `<div class="d2-cli-i">${esc(data.cli_direccion)}</div>` : ''}
+${data.cli_localidad || data.cli_cpostal ? `<div class="d2-cli-i">${esc([data.cli_cpostal, data.cli_localidad].filter(Boolean).join(' '))}</div>` : ''}
+<div class="d2-sep1"></div>
+<div class="d2-hdr">
+  <span class="d2-hd">PRODUCTO</span>
+  <span class="d2-hu">CANT.</span>
+  <span class="d2-hp">PRECIO</span>
+  <span class="d2-hi">TOTAL</span>
+</div>
+${linesHtml}
+<div class="d2-items"><span>Artículos: <b>${totalItems}</b></span></div>
+<div class="d2-sep1"></div>
+<div class="d2-trow">
+  <div class="d2-tr"><span class="d2-tl">BASE IMPONIBLE</span><span class="d2-tv">${money(totalBase)} €</span></div>
+  ${ivaRowsHtml}
+</div>
+<div class="d2-total-box">
+  <span class="d2-total-lbl">TOTAL A PAGAR</span>
+  <span class="d2-total-val">${money(data.total)} €</span>
+</div>
+<div class="d2-sep1"></div>
+${firmaHtml}
+<div class="d2-footer">¡Gracias por su compra!</div>
+</body></html>`
+}
+
+// ─── Canvas Diseño 2: Recibo Moderno ─────────────────────────────────────────
+async function buildTicketCanvasD2(
+  data: TicketData,
+  cfg: Partial<PrinterConfig>,
+  wide = false,
+): Promise<HTMLCanvasElement> {
+  const W      = wide ? 816 : 576
+  const MARGIN = wide ? 14  : 12
+  const IW     = W - MARGIN * 2
+
+  const SZ_HUGE  = wide ? 80  : 64   // número de documento
+  const SZ_TITLE = wide ? 52  : 42   // nombre empresa
+  const SZ_DOC   = wide ? 44  : 36   // tipo documento label
+  const SZ_BODY  = wide ? 38  : 32
+  const SZ_SMALL = wide ? 30  : 26
+  const SZ_TOTAL = wide ? 60  : 48   // total grande
+
+  // Columnas: CANT | DESCRIPCIÓN | PRECIO | TOTAL
+  const C_U = wide ? 72  : 56
+  const C_P = wide ? 120 : 96
+  const C_I = wide ? 120 : 96
+  const C_D = IW - C_U - C_P - C_I
+
+  function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+    if (!text) return ['']
+    const words = text.split(' ')
+    const lines: string[] = []
+    let cur = ''
+    for (const w of words) {
+      const test = cur ? cur + ' ' + w : w
+      if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w }
+      else cur = test
+    }
+    if (cur) lines.push(cur)
+    return lines.length ? lines : ['']
+  }
+
+  function setFont(ctx: CanvasRenderingContext2D, size: number, bold = false) {
+    ctx.font = `${bold ? 'bold ' : ''}${size}px Arial, Helvetica, sans-serif`
+  }
+
+  function drawCentered(ctx: CanvasRenderingContext2D, text: string, y: number) {
+    const w = ctx.measureText(text).width
+    ctx.fillText(text, (W - w) / 2, y)
+  }
+
+  function drawRight(ctx: CanvasRenderingContext2D, text: string, rightX: number, y: number) {
+    const w = ctx.measureText(text).width
+    ctx.fillText(text, rightX - w, y)
+  }
+
+  function drawDoubleLine(ctx: CanvasRenderingContext2D, y: number) {
+    ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(MARGIN, y); ctx.lineTo(W - MARGIN, y); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(MARGIN, y + 4); ctx.lineTo(W - MARGIN, y + 4); ctx.stroke()
+  }
+
+  // Calcular totales
+  const totalesMap: Record<number, { piva: number; base: number; cuota: number }> = {}
+  for (const lin of data.lineas) {
+    const uds = parseFloat(String(lin.unidades)) || 0
+    if (uds === 0 && !lin.es_canon) continue
+    const precioNeto = lin.precio * (1 - lin.dto / 100)
+    const importe = lin.importe ?? (uds * precioNeto)
+    const p = lin.piva
+    if (!totalesMap[p]) totalesMap[p] = { piva: p, base: 0, cuota: 0 }
+    totalesMap[p].base  += importe
+    totalesMap[p].cuota += importe * (p / 100)
+  }
+  const totalesArr = Object.values(totalesMap).sort((a, b) => a.piva - b.piva)
+  const totalBase  = totalesArr.reduce((s, t) => s + t.base, 0)
+
+  // Logo
+  const measure = document.createElement('canvas')
+  measure.width = W; measure.height = 1
+  const mctx = measure.getContext('2d')!
+
+  let totalHeight = MARGIN
+
+  let logoImg: HTMLImageElement | null = null
+  if (cfg.emp_logo) {
+    logoImg = new Image()
+    logoImg.src = cfg.emp_logo
+    await new Promise<void>(r => { logoImg!.onload = () => r(); logoImg!.onerror = () => r() })
+    if (logoImg.naturalWidth > 0) {
+      const scale = Math.min((IW * 0.65) / logoImg.naturalWidth, 1)
+      totalHeight += Math.round(logoImg.naturalHeight * scale) + 10
+    } else { logoImg = null }
+  }
+
+  // Empresa
+  totalHeight += SZ_TITLE + 6
+  if (cfg.emp_direccion) totalHeight += SZ_SMALL + 4
+  if (cfg.emp_cif || cfg.emp_telefono) totalHeight += SZ_SMALL + 4
+  if (cfg.emp_email) totalHeight += SZ_SMALL + 4
+
+  // Doble separador
+  totalHeight += 18
+
+  // Tipo doc + número grande + fecha
+  totalHeight += SZ_DOC + 6
+  totalHeight += SZ_HUGE + 8
+  totalHeight += SZ_SMALL + 6
+  if (data.agenteNombre) totalHeight += SZ_SMALL + 4
+
+  // Separador simple
+  totalHeight += 12
+
+  // Cliente
+  totalHeight += SZ_BODY + 6
+  if (data.cli_alias && data.cli_alias !== data.cli_nombre) totalHeight += SZ_SMALL + 4
+  if (data.cli_cif)       totalHeight += SZ_SMALL + 4
+  if (data.cli_direccion) totalHeight += SZ_SMALL + 4
+  const locStr = [data.cli_cpostal, data.cli_localidad].filter(Boolean).join(' ')
+  if (locStr) totalHeight += SZ_SMALL + 4
+
+  totalHeight += 12
+
+  // Header + líneas
+  totalHeight += SZ_SMALL + 8
+  setFont(mctx, SZ_SMALL)
+  for (const lin of data.lineas) {
+    const uds = parseFloat(String(lin.unidades)) || 0
+    if (uds === 0 && !lin.es_canon) continue
+    let desc = lin.descripcion
+    if (lin.talla || lin.color) desc += ` (${[lin.talla, lin.color].filter(Boolean).join('/')})`
+    const lines = wrapText(mctx, desc, C_D - 4)
+    const shownLines = Math.min(lines.length, 2)
+    totalHeight += shownLines * (SZ_SMALL + 5)
+    if (lin.dto > 0) totalHeight += SZ_SMALL + 3
+    if (lin.tipo_unidad === 1 && lin.gramos) totalHeight += SZ_SMALL + 3
+    if (lin.lote) totalHeight += SZ_SMALL + 3
+    if (lin.fecha_caducidad) totalHeight += SZ_SMALL + 3
+  }
+
+  totalHeight += SZ_SMALL + 4  // Artículos count
+  totalHeight += 14
+
+  // Totales texto
+  totalHeight += SZ_BODY + 6   // Base imponible
+  totalHeight += totalesArr.length * (SZ_BODY + 4)
+
+  totalHeight += 18  // doble sep
+
+  // Total box (inverted)
+  totalHeight += SZ_TOTAL + 24
+
+  totalHeight += 14
+
+  // Firma
+  let firmaImg: HTMLImageElement | null = null
+  if (data.firmaDataUrl) {
+    firmaImg = new Image()
+    firmaImg.src = data.firmaDataUrl
+    await new Promise<void>(r => { firmaImg!.onload = () => r(); firmaImg!.onerror = () => r() })
+    if (firmaImg.naturalWidth > 0) {
+      const scale = Math.min(IW / firmaImg.naturalWidth, 1)
+      totalHeight += SZ_SMALL + 6 + Math.round(firmaImg.naturalHeight * scale) + 8
+    } else { firmaImg = null }
+  }
+
+  totalHeight += SZ_DOC + MARGIN + 8  // footer texto grande
+
+  // ── Segunda pasada: dibujar ──────────────────────────────────────────────
+  const MIN_H = Math.round(150 * (203 / 25.4))
+  const canvas = document.createElement('canvas')
+  canvas.width  = W
+  canvas.height = Math.max(totalHeight, MIN_H)
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, W, canvas.height)
+  ctx.fillStyle = '#000000'
+
+  let y = MARGIN
+
+  // Logo
+  if (logoImg) {
+    const scale = Math.min((IW * 0.65) / logoImg.naturalWidth, 1)
+    const lw = Math.round(logoImg.naturalWidth * scale)
+    const lh = Math.round(logoImg.naturalHeight * scale)
+    ctx.drawImage(logoImg, (W - lw) / 2, y, lw, lh)
+    y += lh + 10
+  }
+
+  // Nombre empresa (grande, centrado)
+  setFont(ctx, SZ_TITLE, true)
+  drawCentered(ctx, cfg.emp_nombre || '', y + SZ_TITLE)
+  y += SZ_TITLE + 6
+
+  setFont(ctx, SZ_SMALL)
+  if (cfg.emp_direccion) {
+    drawCentered(ctx, cfg.emp_direccion, y + SZ_SMALL)
+    y += SZ_SMALL + 4
+  }
+  const cifTelD2 = [
+    cfg.emp_cif      ? `CIF: ${cfg.emp_cif}` : '',
+    cfg.emp_telefono ? `Tel: ${cfg.emp_telefono}` : '',
+  ].filter(Boolean).join('   ')
+  if (cifTelD2) {
+    drawCentered(ctx, cifTelD2, y + SZ_SMALL)
+    y += SZ_SMALL + 4
+  }
+  if (cfg.emp_email) {
+    drawCentered(ctx, cfg.emp_email, y + SZ_SMALL)
+    y += SZ_SMALL + 4
+  }
+
+  // Doble separador
+  y += 4
+  drawDoubleLine(ctx, y)
+  y += 18
+
+  // Tipo documento centrado
+  setFont(ctx, SZ_DOC, true)
+  drawCentered(ctx, data.tipodoc_label.toUpperCase(), y + SZ_DOC)
+  y += SZ_DOC + 6
+
+  // Número grande centrado
+  setFont(ctx, SZ_HUGE, true)
+  drawCentered(ctx, `${data.serie}-${String(data.numero).padStart(6, '0')}`, y + SZ_HUGE)
+  y += SZ_HUGE + 8
+
+  // Fecha centrada
+  setFont(ctx, SZ_SMALL)
+  drawCentered(ctx, formatDate(data.fecha), y + SZ_SMALL)
+  y += SZ_SMALL + 6
+
+  if (data.agenteNombre) {
+    setFont(ctx, SZ_SMALL)
+    drawCentered(ctx, `Vendedor: ${data.agenteNombre}`, y + SZ_SMALL)
+    y += SZ_SMALL + 4
+  }
+
+  // Separador simple
+  y += 2
+  ctx.beginPath(); ctx.moveTo(MARGIN, y); ctx.lineTo(W - MARGIN, y)
+  ctx.lineWidth = 1; ctx.stroke()
+  y += 10
+
+  // Cliente
+  setFont(ctx, SZ_BODY, true)
+  ctx.fillText(data.cli_nombre, MARGIN, y + SZ_BODY)
+  y += SZ_BODY + 6
+  setFont(ctx, SZ_SMALL)
+  if (data.cli_alias && data.cli_alias !== data.cli_nombre) {
+    ctx.fillText(`Alias: ${data.cli_alias}`, MARGIN, y + SZ_SMALL); y += SZ_SMALL + 4
+  }
+  if (data.cli_cif) {
+    ctx.fillText(`CIF: ${data.cli_cif}`, MARGIN, y + SZ_SMALL); y += SZ_SMALL + 4
+  }
+  if (data.cli_direccion) {
+    ctx.fillText(data.cli_direccion, MARGIN, y + SZ_SMALL); y += SZ_SMALL + 4
+  }
+  if (locStr) {
+    ctx.fillText(locStr, MARGIN, y + SZ_SMALL); y += SZ_SMALL + 4
+  }
+
+  // Separador
+  y += 2
+  ctx.beginPath(); ctx.moveTo(MARGIN, y); ctx.lineTo(W - MARGIN, y); ctx.stroke()
+  y += 10
+
+  // Header columnas: CANT | DESCRIPCIÓN | PRECIO | TOTAL
+  setFont(ctx, SZ_SMALL, true)
+  drawRight(ctx, 'CANT',   MARGIN + C_U,         y + SZ_SMALL)
+  ctx.fillText('PRODUCTO',  MARGIN + C_U + 4,    y + SZ_SMALL)
+  drawRight(ctx, 'PRECIO',  MARGIN + C_U + C_D + C_P, y + SZ_SMALL)
+  drawRight(ctx, 'TOTAL',   MARGIN + IW,              y + SZ_SMALL)
+  y += SZ_SMALL + 4
+  ctx.beginPath(); ctx.moveTo(MARGIN, y); ctx.lineTo(W - MARGIN, y)
+  ctx.lineWidth = 0.5; ctx.stroke(); ctx.lineWidth = 1
+  y += 4
+
+  // Líneas de artículo
+  let numItems = 0
+  for (const lin of data.lineas) {
+    const uds = parseFloat(String(lin.unidades)) || 0
+    if (uds === 0 && !lin.es_canon) continue
+    numItems++
+    const precioNeto = lin.precio * (1 - lin.dto / 100)
+    const importe    = lin.importe ?? (uds * precioNeto)
+    const udsStr     = uds % 1 === 0 ? String(uds) : uds.toLocaleString('es-ES', { maximumFractionDigits: 3 })
+    let desc = lin.descripcion
+    if (lin.talla || lin.color) desc += ` (${[lin.talla, lin.color].filter(Boolean).join('/')})`
+    setFont(ctx, SZ_SMALL)
+    const descLines = wrapText(ctx, desc, C_D - 4)
+    const shownLines = Math.min(descLines.length, 2)
+    for (let i = 0; i < shownLines; i++) {
+      let lineText = descLines[i]
+      if (i === shownLines - 1 && descLines.length > shownLines) {
+        while (ctx.measureText(lineText + '…').width > C_D - 4 && lineText.length > 0)
+          lineText = lineText.slice(0, -1)
+        lineText += '…'
+      }
+      ctx.fillText(lineText, MARGIN + C_U + 4, y + SZ_SMALL)
+      if (i === 0) {
+        drawRight(ctx, udsStr,            MARGIN + C_U,              y + SZ_SMALL)
+        drawRight(ctx, money(lin.precio), MARGIN + C_U + C_D + C_P,  y + SZ_SMALL)
+        drawRight(ctx, money(importe),    MARGIN + IW,               y + SZ_SMALL)
+      }
+      y += SZ_SMALL + 5
+    }
+    if (lin.dto > 0) {
+      drawRight(ctx, `Dto ${lin.dto}%`, MARGIN + C_U + C_D + C_P, y + SZ_SMALL)
+      y += SZ_SMALL + 3
+    }
+    if (lin.tipo_unidad === 1 && lin.gramos) {
+      const gr = parseFloat(String(lin.gramos)).toLocaleString('es-ES', { maximumFractionDigits: 3 })
+      ctx.fillText(`  → ${gr} ${lin.unidad || 'kg'}`, MARGIN + C_U + 4, y + SZ_SMALL)
+      y += SZ_SMALL + 3
+    }
+    if (lin.lote) {
+      ctx.fillText(`  Lote: ${lin.lote}`, MARGIN + C_U + 4, y + SZ_SMALL)
+      y += SZ_SMALL + 3
+    }
+    if (lin.fecha_caducidad) {
+      ctx.fillText(`  Cad: ${lin.fecha_caducidad}`, MARGIN + C_U + 4, y + SZ_SMALL)
+      y += SZ_SMALL + 3
+    }
+  }
+
+  // Cantidad artículos
+  y += 4
+  setFont(ctx, SZ_SMALL, true)
+  drawRight(ctx, `ARTÍCULOS: ${numItems}`, W - MARGIN, y + SZ_SMALL)
+  y += SZ_SMALL + 4
+
+  // Separador
+  ctx.beginPath(); ctx.moveTo(MARGIN, y); ctx.lineTo(W - MARGIN, y)
+  ctx.lineWidth = 1; ctx.stroke()
+  y += 10
+
+  // Totales (base + IVA) — empuje al final
+  const totalesH =
+    (SZ_BODY + 6) + totalesArr.length * (SZ_BODY + 4) +
+    18 + (SZ_TOTAL + 24) + 14 +
+    SZ_DOC + MARGIN + 8
+  const MIN_CM13 = Math.round(130 * (203 / 25.4))
+  const totalsMinY = MIN_CM13 - totalesH
+  if (y < totalsMinY) y = totalsMinY
+
+  setFont(ctx, SZ_BODY)
+  ctx.fillText('BASE IMPONIBLE:', MARGIN, y + SZ_BODY)
+  drawRight(ctx, `${money(totalBase)} EUR`, W - MARGIN, y + SZ_BODY)
+  y += SZ_BODY + 6
+  for (const t of totalesArr) {
+    ctx.fillText(`IVA ${t.piva}%:`, MARGIN, y + SZ_BODY)
+    drawRight(ctx, `${money(t.cuota)} EUR`, W - MARGIN, y + SZ_BODY)
+    y += SZ_BODY + 4
+  }
+
+  // Doble separador
+  y += 4
+  drawDoubleLine(ctx, y)
+  y += 18
+
+  // Caja total invertida
+  const boxH = SZ_TOTAL + 20
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(MARGIN, y, IW, boxH)
+  ctx.fillStyle = '#ffffff'
+  setFont(ctx, SZ_BODY, true)
+  ctx.fillText('TOTAL A PAGAR:', MARGIN + 8, y + boxH / 2 + SZ_BODY / 3)
+  setFont(ctx, SZ_TOTAL, true)
+  drawRight(ctx, `${money(data.total)}€`, MARGIN + IW - 8, y + boxH / 2 + SZ_TOTAL / 3)
+  ctx.fillStyle = '#000000'
+  y += boxH + 14
+
+  // Firma
+  if (firmaImg) {
+    setFont(ctx, SZ_SMALL, true)
+    drawCentered(ctx, 'FIRMA DEL CLIENTE', y + SZ_SMALL)
+    y += SZ_SMALL + 6
+    const scale = Math.min(IW / firmaImg.naturalWidth, 1)
+    const fw = Math.round(firmaImg.naturalWidth * scale)
+    const fh = Math.round(firmaImg.naturalHeight * scale)
+    ctx.drawImage(firmaImg, (W - fw) / 2, y, fw, fh)
+    y += fh + 8
+  }
+
+  // Footer
+  ctx.fillStyle = '#000000'
+  setFont(ctx, SZ_DOC, true)
+  drawCentered(ctx, '¡Gracias por su compra!', y + SZ_DOC)
+
+  return canvas
+}
+
 // ─── Renderizado gráfico en canvas ──────────────────────────────────────────
 /**
  * Dibuja el ticket completo en un HTMLCanvasElement de 576 píxeles de ancho
@@ -225,9 +775,11 @@ async function buildTicketCanvas(
   wide = false,
 ): Promise<HTMLCanvasElement> {
 
-  // wide=true  → 100 mm: 576 dots (72mm imprimible × 8 dots/mm a 203 DPI)
-  // wide=false →  80 mm: 576 dots (72mm imprimible × 8 dots/mm a 203 DPI)
-  //   576 = múltiplo de 8 → 72 bytes/línea exactos para GS v 0
+  if ((cfg.ticket_design ?? 1) === 2) return buildTicketCanvasD2(data, cfg, wide)
+
+  // wide=true  → 100 mm: 736 dots (92mm imprimible)
+  // wide=false →  80 mm: 576 dots (72mm imprimible)
+  //   576 / 736 = múltiplos de 8 → bytes/línea exactos para GS v 0
   const W      = wide ? 736  : 576
   const MARGIN = wide ? 14   : 12    // dots de margen lateral
   const IW     = W - MARGIN * 2
@@ -313,7 +865,12 @@ async function buildTicketCanvas(
   totalHeight += 14
 
   // Cliente
-  totalHeight += SZ_BODY + 6
+  totalHeight += SZ_BODY + 6  // nombre (bold)
+  if (data.cli_alias && data.cli_alias !== data.cli_nombre) totalHeight += SZ_SMALL + 4
+  if (data.cli_cif)       totalHeight += SZ_SMALL + 4
+  if (data.cli_direccion) totalHeight += SZ_SMALL + 4
+  const locStr = [data.cli_cpostal, data.cli_localidad].filter(Boolean).join(' ')
+  if (locStr) totalHeight += SZ_SMALL + 4
 
   // Separador
   totalHeight += 14
@@ -333,6 +890,8 @@ async function buildTicketCanvas(
     totalHeight += shownLines * (SZ_SMALL + 4)
     if (lin.dto > 0) totalHeight += SZ_SMALL + 3
     if (lin.tipo_unidad === 1 && lin.gramos) totalHeight += SZ_SMALL + 3
+    if (lin.lote) totalHeight += SZ_SMALL + 3
+    if (lin.fecha_caducidad) totalHeight += SZ_SMALL + 3
   }
 
   // Separador
@@ -344,7 +903,7 @@ async function buildTicketCanvas(
     const uds = parseFloat(String(lin.unidades)) || 0
     if (uds === 0 && !lin.es_canon) continue
     const precioNeto = lin.precio * (1 - lin.dto / 100)
-    const importe = uds * precioNeto
+    const importe = lin.importe ?? (uds * precioNeto)
     const p = lin.piva
     if (!totalesMap[p]) totalesMap[p] = { piva: p, base: 0, cuota: 0 }
     totalesMap[p].base  += importe
@@ -456,8 +1015,27 @@ async function buildTicketCanvas(
 
   // Cliente
   setFont(ctx, SZ_BODY, true)
-  ctx.fillText(`Cliente: ${data.cli_nombre}`, MARGIN, y + SZ_BODY)
+  ctx.fillText(data.cli_nombre, MARGIN, y + SZ_BODY)
   y += SZ_BODY + 6
+
+  setFont(ctx, SZ_SMALL)
+  if (data.cli_alias && data.cli_alias !== data.cli_nombre) {
+    ctx.fillText(`Alias: ${data.cli_alias}`, MARGIN, y + SZ_SMALL)
+    y += SZ_SMALL + 4
+  }
+  if (data.cli_cif) {
+    ctx.fillText(`CIF: ${data.cli_cif}`, MARGIN, y + SZ_SMALL)
+    y += SZ_SMALL + 4
+  }
+  if (data.cli_direccion) {
+    ctx.fillText(data.cli_direccion, MARGIN, y + SZ_SMALL)
+    y += SZ_SMALL + 4
+  }
+  const localidadStr = [data.cli_cpostal, data.cli_localidad].filter(Boolean).join(' ')
+  if (localidadStr) {
+    ctx.fillText(localidadStr, MARGIN, y + SZ_SMALL)
+    y += SZ_SMALL + 4
+  }
 
   // Separador
   y += 4
@@ -482,7 +1060,7 @@ async function buildTicketCanvas(
     if (uds === 0 && !lin.es_canon) continue
 
     const precioNeto = lin.precio * (1 - lin.dto / 100)
-    const importe    = uds * precioNeto
+    const importe    = lin.importe ?? (uds * precioNeto)
     const udsStr     = uds % 1 === 0 ? String(uds) : uds.toLocaleString('es-ES', { maximumFractionDigits: 3 })
 
     let desc = lin.descripcion
@@ -502,7 +1080,7 @@ async function buildTicketCanvas(
       ctx.fillText(lineText, MARGIN + C_U + 4, y + SZ_SMALL)
       if (i === 0) {
         drawRight(ctx, udsStr,             MARGIN + C_U,              y + SZ_SMALL)
-        drawRight(ctx, money(precioNeto),  MARGIN + C_U + C_D + C_P,  y + SZ_SMALL)
+        drawRight(ctx, money(lin.precio),  MARGIN + C_U + C_D + C_P,  y + SZ_SMALL)
         drawRight(ctx, money(importe),     MARGIN + IW,               y + SZ_SMALL)
       }
       y += SZ_SMALL + 4
@@ -517,6 +1095,16 @@ async function buildTicketCanvas(
       setFont(ctx, SZ_SMALL)
       const gr = parseFloat(String(lin.gramos)).toLocaleString('es-ES', { maximumFractionDigits: 3 })
       ctx.fillText(`  → ${gr} ${lin.unidad || 'kg'}`, MARGIN + C_U + 4, y + SZ_SMALL)
+      y += SZ_SMALL + 3
+    }
+    if (lin.lote) {
+      setFont(ctx, SZ_SMALL)
+      ctx.fillText(`  Lote: ${lin.lote}`, MARGIN + C_U + 4, y + SZ_SMALL)
+      y += SZ_SMALL + 3
+    }
+    if (lin.fecha_caducidad) {
+      setFont(ctx, SZ_SMALL)
+      ctx.fillText(`  Cad: ${lin.fecha_caducidad}`, MARGIN + C_U + 4, y + SZ_SMALL)
       y += SZ_SMALL + 3
     }
   }

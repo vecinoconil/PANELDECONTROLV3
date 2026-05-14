@@ -22,6 +22,7 @@ export interface UserMe {
     caja_reparto: number | null
     precargar_historial_autoventa: boolean
     paper_width_impresora: 80 | 100
+    ticket_design_autoventa: 1 | 2
     serie_expediciones: string[]
 }
 
@@ -44,20 +45,54 @@ export function hasPermiso(
 }
 
 export const PERMISOS_DISPONIBLES = [
-    { key: 'dashboard',          label: 'Dashboard' },
-    { key: 'comparativa_ventas', label: 'Comparativa Ventas' },
-    { key: 'contabilidad',       label: 'Contabilidad' },
-    { key: 'contratos',          label: 'Gestión de Contratos' },
-    { key: 'autoventa',          label: 'Autoventa' },
-    { key: 'expediciones',       label: 'Expediciones' },
-    { key: 'hojas_carga',        label: 'Hojas de Carga' },
-    { key: 'reparto',            label: 'Reparto' },
-    { key: 'recepcion_pedidos',  label: 'Recepción de Pedidos' },
-    { key: 'inventario',         label: 'Inventarios' },
-    { key: 'admin_empresas',     label: 'Admin Empresas' },
-    { key: 'admin_locales',      label: 'Admin Locales' },
-    { key: 'admin_usuarios',     label: 'Admin Usuarios' },
+    { key: 'dashboard',            label: 'Dashboard' },
+    { key: 'comparativa_ventas',   label: 'Comparativa Ventas' },
+    { key: 'contabilidad',         label: 'Contabilidad' },
+    { key: 'contratos',            label: 'Gestión de Contratos' },
+    { key: 'autoventa',            label: 'Autoventa' },
+    { key: 'expediciones',         label: 'Expediciones' },
+    { key: 'hojas_carga',          label: 'Hojas de Carga' },
+    { key: 'reparto',              label: 'Reparto' },
+    { key: 'recepcion_pedidos',    label: 'Recepción de Pedidos' },
+    { key: 'inventario',           label: 'Inventarios' },
+    { key: 'seguimiento_locales',  label: 'Seguimiento Locales' },
+    { key: 'admin_empresas',       label: 'Admin Empresas' },
+    { key: 'admin_locales',        label: 'Admin Locales' },
+    { key: 'admin_usuarios',       label: 'Admin Usuarios' },
 ] as const
+
+const PRIMER_RUTA_POR_PERMISO: Record<string, string> = {
+    dashboard:           '/dashboard',
+    comparativa_ventas:  '/informes/comparativa-ventas',
+    contabilidad:        '/contabilidad/libro-iva',
+    contratos:           '/contratos',
+    autoventa:           '/autoventa',
+    expediciones:        '/almacen/expediciones',
+    hojas_carga:         '/almacen/hojas-carga',
+    reparto:             '/almacen/reparto',
+    recepcion_pedidos:   '/almacen/recepcion-pedidos',
+    inventario:          '/inventario',
+    seguimiento_locales: '/seguimiento-locales',
+    admin_empresas:      '/admin/empresas',
+    admin_locales:       '/admin/locales',
+    admin_usuarios:      '/admin/usuarios',
+}
+
+export function getFirstAllowedRoute(user: UserMe | null): string {
+    if (!user) return '/login'
+    if (user.rol === 'superadmin') return '/dashboard'
+    const hasAny = Object.keys(user.permisos || {}).length > 0
+    for (const { key } of PERMISOS_DISPONIBLES) {
+        let ok: boolean
+        if (user.rol === 'gerente') {
+            ok = !hasAny || (!!user.permisos[key]?.entrar)
+        } else {
+            ok = hasPermiso(user.permisos, key, 'entrar')
+        }
+        if (ok) return PRIMER_RUTA_POR_PERMISO[key] ?? '/dashboard'
+    }
+    return '/dashboard'
+}
 
 export interface TokenResponse {
     access_token: string

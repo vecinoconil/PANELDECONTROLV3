@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './auth/AuthContext'
+import { useAuth } from './auth/AuthContext'
 import ProtectedRoute from './auth/ProtectedRoute'
+import { getFirstAllowedRoute } from './types'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -19,6 +21,13 @@ import Contratos from './pages/contratos/Contratos'
 import SeguimientoLocales from './pages/admin/SeguimientoLocales'
 import BasesDatos from './pages/admin/BasesDatos'
 import PortalCliente from './pages/PortalCliente'
+
+function HomeRedirect() {
+    const { user, loading } = useAuth()
+    if (loading) return null
+    if (!user) return <Navigate to="/login" replace />
+    return <Navigate to={getFirstAllowedRoute(user)} replace />
+}
 
 export default function App() {
     return (
@@ -77,7 +86,7 @@ export default function App() {
                             </Route>
                         </Route>
                     </Route>
-                    <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                    <Route path="*" element={<HomeRedirect />} />
                 </Routes>
             </BrowserRouter>
         </AuthProvider>

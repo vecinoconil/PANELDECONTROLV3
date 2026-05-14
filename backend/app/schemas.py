@@ -88,6 +88,7 @@ class UserMe(BaseModel):
     caja_reparto: Optional[int] = None
     precargar_historial_autoventa: bool = True
     paper_width_impresora: int = 80
+    ticket_design_autoventa: int = 1
     serie_expediciones: list[str] = []
 
     @field_validator('tipodocs_autoventa', mode='before')
@@ -229,6 +230,7 @@ class UsuarioCreate(BaseModel):
     precargar_historial_autoventa: bool = True
     caja_reparto: Optional[int] = None
     paper_width_impresora: int = 80
+    ticket_design_autoventa: int = 1
     serie_expediciones: list[str] = []
 
 
@@ -259,6 +261,7 @@ class UsuarioUpdate(BaseModel):
     precargar_historial_autoventa: Optional[bool] = None
     caja_reparto: Optional[int] = None
     paper_width_impresora: Optional[int] = None
+    ticket_design_autoventa: Optional[int] = None
     serie_expediciones: Optional[list[str]] = None
 
 
@@ -284,6 +287,7 @@ class UsuarioRead(BaseModel):
     precargar_historial_autoventa: bool = True
     caja_reparto: Optional[int] = None
     paper_width_impresora: int = 80
+    ticket_design_autoventa: int = 1
     serie_expediciones: list[str] = []
 
     @field_validator('permisos', mode='before')
